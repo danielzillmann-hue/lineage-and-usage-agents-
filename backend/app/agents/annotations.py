@@ -88,13 +88,40 @@ async def annotate_columns(inv: Inventory, emit: EmitFn) -> None:
         await log_event(emit, AgentName.INVENTORY, "Column annotation: empty response from model")
         return
 
-    by_fqn: dict[str, dict[str, Any]] = {str(r.get("fqn", "")).upper(): r for r in rows}
+    # Build multiple lookup keys per row so we can match flexibly:
+    #   schema.table.column  (the full fqn we asked for)
+    #   table.column         (Gemini sometimes drops the schema)
+    #   column               (last-resort, ambiguous but often unique within a table)
+    # Each entry is (specificity, row); higher specificity wins on collision.
+    flexible: dict[str, tuple[int, dict[str, Any]]] = {}
+    for r in rows:
+        fqn = str(r.get("fqn", "")).upper()
+        if not fqn:
+            continue
+        parts = fqn.split(".")
+        candidates: list[tuple[int, str]] = []
+        if len(parts) >= 3:
+            candidates.append((3, ".".join(parts[-3:])))
+        if len(parts) >= 2:
+            candidates.append((2, ".".join(parts[-2:])))
+        if parts:
+            candidates.append((1, parts[-1]))
+        for spec, key in candidates:
+            cur = flexible.get(key)
+            if not cur or cur[0] < spec:
+                flexible[key] = (spec, r)
 
     applied = 0
     for t in inv.tables:
         for c in t.columns:
-            key = f"{t.fqn}.{c.name}".upper()
-            row = by_fqn.get(key)
+            full = f"{t.fqn}.{c.name}".upper()
+            short = f"{t.name}.{c.name}".upper()
+            bare = c.name.upper()
+            row = (
+                (flexible.get(full) or (0, None))[1]
+                or (flexible.get(short) or (0, None))[1]
+                or (flexible.get(bare) or (0, None))[1]
+            )
             if not row:
                 continue
             try:
@@ -110,7 +137,10 @@ async def annotate_columns(inv: Inventory, emit: EmitFn) -> None:
                 c.annotation_notes = note.strip()[:160]
             applied += 1
 
-    await log_event(emit, AgentName.INVENTORY, f"Column annotations applied to {applied} of {len(payload)}")
+    await log_event(
+        emit, AgentName.INVENTORY,
+        f"Column annotations: model returned {len(rows)}, applied to {applied} of {len(payload)} columns",
+    )
 
 
 def _parse_json_array(text: str) -> list[dict[str, Any]]:
