@@ -14,7 +14,6 @@ substitutions:
   _AR_REPO: lineage-agents
   _BACKEND_SERVICE: lineage-agents-api
   _FRONTEND_SERVICE: lineage-agents-web
-  _RUN_SA: ""   # leave empty to use default Compute SA
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -29,7 +28,7 @@ steps:
     args:
       - build
       - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_BACKEND_SERVICE}:$BUILD_ID
       - -t
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_BACKEND_SERVICE}:latest
       - .
@@ -49,7 +48,7 @@ steps:
       - |
         set -euo pipefail
         gcloud run deploy ${_BACKEND_SERVICE} \
-          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA \
+          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_BACKEND_SERVICE}:$BUILD_ID \
           --region=${_REGION} \
           --platform=managed \
           --allow-unauthenticated \
@@ -59,9 +58,9 @@ steps:
           --concurrency=20 \
           --timeout=900 \
           --set-env-vars="APP_GCP_PROJECT=$PROJECT_ID,APP_GCP_REGION=${_REGION},APP_VERTEX_LOCATION=${_REGION},APP_RESULTS_BUCKET=dan-sandpit-lineage-results,APP_CORS_ORIGINS=[\"*\"]"
-        URL=$(gcloud run services describe ${_BACKEND_SERVICE} --region=${_REGION} --format='value(status.url)')
-        echo "$URL" > /workspace/backend_url.txt
-        echo "Backend deployed at: $URL"
+        URL=$$(gcloud run services describe ${_BACKEND_SERVICE} --region=${_REGION} --format='value(status.url)')
+        echo "$$URL" > /workspace/backend_url.txt
+        echo "Backend deployed at: $$URL"
 
   # ─── 3. Build frontend image with backend URL baked in ────────────────
   - id: frontend-build
@@ -73,11 +72,11 @@ steps:
       - -c
       - |
         set -euo pipefail
-        BACKEND_URL=$(cat /workspace/backend_url.txt)
-        echo "Building frontend with NEXT_PUBLIC_API_BASE=$BACKEND_URL"
+        BACKEND_URL=$$(cat /workspace/backend_url.txt)
+        echo "Building frontend with NEXT_PUBLIC_API_BASE=$$BACKEND_URL"
         docker build \
-          --build-arg NEXT_PUBLIC_API_BASE="$BACKEND_URL" \
-          -t ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA \
+          --build-arg NEXT_PUBLIC_API_BASE="$$BACKEND_URL" \
+          -t ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_FRONTEND_SERVICE}:$BUILD_ID \
           -t ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_FRONTEND_SERVICE}:latest \
           .
 
@@ -96,7 +95,7 @@ steps:
       - |
         set -euo pipefail
         gcloud run deploy ${_FRONTEND_SERVICE} \
-          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA \
+          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_FRONTEND_SERVICE}:$BUILD_ID \
           --region=${_REGION} \
           --platform=managed \
           --allow-unauthenticated \
@@ -104,5 +103,5 @@ steps:
           --max-instances=4 \
           --cpu=1 --memory=512Mi \
           --concurrency=80
-        URL=$(gcloud run services describe ${_FRONTEND_SERVICE} --region=${_REGION} --format='value(status.url)')
-        echo "Frontend deployed at: $URL"
+        URL=$$(gcloud run services describe ${_FRONTEND_SERVICE} --region=${_REGION} --format='value(status.url)')
+        echo "Frontend deployed at: $$URL"
