@@ -13,11 +13,12 @@ class Settings(BaseSettings):
     firestore_collection_runs: str = Field(default="lineage_runs")
     results_bucket: str = Field(default="dan-sandpit-lineage-results")
 
-    anthropic_api_key: str = Field(default="")
-    inventory_model: str = Field(default="claude-sonnet-4-6")
-    lineage_model: str = Field(default="claude-sonnet-4-6")
-    usage_model: str = Field(default="claude-sonnet-4-6")
-    summary_model: str = Field(default="claude-opus-4-7")
+    # Vertex AI Gemini — uses ADC, no API key needed.
+    vertex_location: str = Field(default="australia-southeast1")
+    inventory_model: str = Field(default="gemini-2.5-flash")
+    lineage_model: str = Field(default="gemini-2.5-flash")
+    usage_model: str = Field(default="gemini-2.5-flash")
+    summary_model: str = Field(default="gemini-2.5-pro")
 
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
     log_level: str = Field(default="INFO")

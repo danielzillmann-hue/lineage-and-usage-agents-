@@ -38,7 +38,7 @@ export function ExecutiveSummaryView({ results }: { results: RunResults }) {
         <Card>
           <CardHeader>
             <CardTitle>Headline</CardTitle>
-            <CardDescription>Synthesized by Opus 4.7 from the agents&apos; outputs.</CardDescription>
+            <CardDescription>Synthesized by Gemini 2.5 Pro from the agents&apos; outputs.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-[15px] leading-relaxed text-white text-pretty">{sum.headline}</p>

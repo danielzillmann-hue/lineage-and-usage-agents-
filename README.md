@@ -6,7 +6,7 @@ Multi-agent analyzer for Oracle data warehouses. Reads DDL, data-dictionary expo
 - **Lineage** — table- and column-level DAG, deterministic from views/CTAS via sqlglot, LLM-augmented for PL/SQL procedures
 - **Usage** — query-frequency analysis joined onto the lineage graph: hot tables, write-only orphans, reporting-layer reachability
 
-Built for the Insignia Financial sales pitch (2026-05-12). FastAPI + Anthropic Claude on Cloud Run, Next.js frontend.
+Built for the Insignia Financial sales pitch (2026-05-12). FastAPI + Vertex Gemini on Cloud Run, Next.js frontend.
 
 ## Layout
 

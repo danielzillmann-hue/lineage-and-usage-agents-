@@ -40,7 +40,7 @@ const AGENTS: { id: AgentName; title: string; tagline: string; icon: React.Compo
   {
     id: "summary",
     title: "Executive summary",
-    tagline: "Opus 4.7 synthesis: headline, findings, recommendations",
+    tagline: "Gemini 2.5 Pro synthesis: headline, findings, recommendations",
     icon: Sparkles,
     tint: "from-[#ff6b47] to-[#f6b400]",
   },
@@ -165,7 +165,7 @@ export function SetupForm() {
               <ArrowRight className="h-4 w-4" />
             </Button>
             <div className="text-[11px] text-[var(--color-fg-subtle)] text-center">
-              Sonnet 4.6 for agent work · Opus 4.7 for synthesis
+              Gemini 2.5 Flash for agents · 2.5 Pro for synthesis · Vertex AI
             </div>
           </CardContent>
         </Card>
