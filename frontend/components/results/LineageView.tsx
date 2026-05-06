@@ -106,11 +106,30 @@ export function LineageView({ lineage, inventory }: { lineage?: LineageGraph; in
 
   const focusSet = useMemo(() => {
     if (!selected) return null;
-    const set = new Set<string>([selected]);
+    // Full lineage: BFS upstream + downstream from the selected node so the
+    // entire connected chain lights up, not just the immediate neighbours.
+    const upstreamMap = new Map<string, string[]>();
+    const downstreamMap = new Map<string, string[]>();
     for (const e of edges) {
-      if (e.src === selected) set.add(e.dst);
-      if (e.dst === selected) set.add(e.src);
+      if (!downstreamMap.has(e.src)) downstreamMap.set(e.src, []);
+      downstreamMap.get(e.src)!.push(e.dst);
+      if (!upstreamMap.has(e.dst)) upstreamMap.set(e.dst, []);
+      upstreamMap.get(e.dst)!.push(e.src);
     }
+    const set = new Set<string>([selected]);
+    const walk = (start: string, adjacency: Map<string, string[]>) => {
+      const stack = [start];
+      while (stack.length) {
+        const node = stack.pop()!;
+        for (const next of adjacency.get(node) ?? []) {
+          if (set.has(next)) continue;
+          set.add(next);
+          stack.push(next);
+        }
+      }
+    };
+    walk(selected, upstreamMap);
+    walk(selected, downstreamMap);
     return set;
   }, [selected, edges]);
 
