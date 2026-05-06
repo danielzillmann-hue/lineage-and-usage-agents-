@@ -1,0 +1,130 @@
+"""Column annotation pass — Gemini classifies every Inventory column for
+sensitivity (PII/financial/tax/internal/public) and nature (data/key/audit/
+calculated/reference).
+
+Run after the Inventory agent has built the table list and before the rule
+extractor / decommission scoring (since drivers can reference annotations).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+from app.agents.base import EmitFn, log_event, stream_thinking
+from app.config import get_settings
+from app.models.run import AgentName
+from app.models.schema import Column, ColumnNature, Inventory, Sensitivity, Table
+
+log = logging.getLogger(__name__)
+
+
+_PROMPT = """\
+You are classifying columns of an Australian wealth-management Oracle warehouse
+for a migration program at Insignia Financial.
+
+For each column, return:
+
+  - sensitivity: one of
+      pii        — personal identifying (DOB, full name, email, phone, address,
+                   member/client/customer number, TFN-like identifier)
+      financial  — money amounts, balances, allocations, holdings, fees,
+                   transactions, prices
+      tax        — tax-related (TFN, tax codes, withheld amounts)
+      internal   — business but not externally sensitive (status codes,
+                   internal IDs, system flags)
+      public     — safe to share (timestamps, generic refs, reference values)
+
+  - nature: one of
+      key         — primary key, foreign key, surrogate key, identifier
+      audit       — load_dt, created_by, updated_at, source_id, etl-trail
+      calculated  — derived (ratios, percentages, _pct suffix, age, score)
+      reference   — lookup/dimension code (small enum: status, type, category)
+      data        — anything else (the default)
+
+  - notes: 4-12 word rationale.
+
+Output ONLY a JSON array of objects with keys:
+  fqn (string, the column's "schema.table.column"),
+  sensitivity (string),
+  nature (string),
+  notes (string).
+
+Be conservative — when in doubt, prefer "internal" + "data".
+"""
+
+
+async def annotate_columns(inv: Inventory, emit: EmitFn) -> None:
+    if not inv.tables:
+        return
+
+    payload = []
+    for t in inv.tables:
+        for c in t.columns:
+            payload.append({
+                "fqn": f"{t.fqn}.{c.name}",
+                "table": t.name, "column": c.name,
+                "data_type": c.data_type,
+                "is_pk": c.is_pk, "is_fk": c.is_fk,
+                "fk_target": c.fk_target,
+                "comment": c.comment or "",
+            })
+
+    if not payload:
+        return
+
+    await log_event(emit, AgentName.INVENTORY, f"Classifying {len(payload)} columns for sensitivity + nature")
+
+    text = await stream_thinking(
+        emit, AgentName.INVENTORY, get_settings().inventory_model,
+        system=_PROMPT,
+        user=json.dumps(payload, indent=2),
+        json_mode=True,
+    )
+
+    rows = _parse_json_array(text)
+    if not rows:
+        await log_event(emit, AgentName.INVENTORY, "Column annotation: empty response from model")
+        return
+
+    by_fqn: dict[str, dict[str, Any]] = {str(r.get("fqn", "")).upper(): r for r in rows}
+
+    applied = 0
+    for t in inv.tables:
+        for c in t.columns:
+            key = f"{t.fqn}.{c.name}".upper()
+            row = by_fqn.get(key)
+            if not row:
+                continue
+            try:
+                c.sensitivity = Sensitivity(row.get("sensitivity", "internal"))
+            except ValueError:
+                c.sensitivity = Sensitivity.INTERNAL
+            try:
+                c.nature = ColumnNature(row.get("nature", "data"))
+            except ValueError:
+                c.nature = ColumnNature.DATA
+            note = row.get("notes")
+            if isinstance(note, str) and note.strip():
+                c.annotation_notes = note.strip()[:160]
+            applied += 1
+
+    await log_event(emit, AgentName.INVENTORY, f"Column annotations applied to {applied} of {len(payload)}")
+
+
+def _parse_json_array(text: str) -> list[dict[str, Any]]:
+    s = text.strip()
+    if s.startswith("```"):
+        s = s.strip("`").lstrip("json").strip()
+    try:
+        parsed: Any = json.loads(s)
+    except Exception:  # noqa: BLE001
+        log.warning("annotations parse failed; first 200=%r", text[:200])
+        return []
+    if isinstance(parsed, dict):
+        for k in ("items", "results", "annotations", "data"):
+            if isinstance(parsed.get(k), list):
+                return parsed[k]
+        return []
+    return parsed if isinstance(parsed, list) else []

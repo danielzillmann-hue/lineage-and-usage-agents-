@@ -120,35 +120,45 @@ export function TableDetailDrawer({ table, onClose, pipelines = [] }: Props) {
                   <tr className="bg-[var(--color-bg-elev-2)]/60 text-[10.5px] uppercase tracking-wider text-[var(--color-fg-subtle)]">
                     <th className="text-left px-3 py-2 font-medium">Name</th>
                     <th className="text-left px-3 py-2 font-medium">Type</th>
+                    <th className="text-left px-3 py-2 font-medium">Sensitivity</th>
+                    <th className="text-left px-3 py-2 font-medium">Nature</th>
                     <th className="text-center px-2 py-2 font-medium">Null</th>
                     <th className="text-left px-3 py-2 font-medium">Key</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {table.columns.map((col) => (
-                    <tr key={col.name} className="border-t border-[var(--color-border-soft)] hover:bg-white/[0.02]">
-                      <td className="px-3 py-2 font-mono text-[var(--ink)]">{col.name}</td>
-                      <td className="px-3 py-2 text-[11.5px] font-mono text-[var(--color-fg-muted)]">{col.data_type}</td>
-                      <td className="px-2 py-2 text-center text-[11px]">
-                        {col.nullable
-                          ? <span className="text-[var(--color-fg-subtle)]">yes</span>
-                          : <span className="text-[var(--color-amber)]">no</span>}
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {col.is_pk && (
-                            <Badge variant="info"><Key className="h-2.5 w-2.5" /> PK</Badge>
-                          )}
-                          {col.is_fk && (
-                            <span className="inline-flex items-center gap-1 text-[10.5px] font-mono text-[var(--color-cyan-soft)]">
-                              <Link2 className="h-2.5 w-2.5" />
-                              {col.fk_target}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {table.columns.map((col) => {
+                    const sens = col.sensitivity ?? "internal";
+                    const sensVariant =
+                      sens === "pii" ? "crit" :
+                      sens === "tax" ? "warn" :
+                      sens === "financial" ? "warn" :
+                      sens === "public" ? "ok" : "neutral";
+                    return (
+                      <tr key={col.name} className="border-t border-[var(--color-border-soft)] hover:bg-white/[0.02]" title={col.annotation_notes ?? undefined}>
+                        <td className="px-3 py-2 font-mono text-[var(--ink)]">{col.name}</td>
+                        <td className="px-3 py-2 text-[11.5px] font-mono text-[var(--color-fg-muted)]">{col.data_type}</td>
+                        <td className="px-3 py-2"><Badge variant={sensVariant}>{sens}</Badge></td>
+                        <td className="px-3 py-2 text-[11.5px] text-[var(--color-fg-muted)]">{col.nature ?? "data"}</td>
+                        <td className="px-2 py-2 text-center text-[11px]">
+                          {col.nullable
+                            ? <span className="text-[var(--color-fg-subtle)]">yes</span>
+                            : <span className="text-[var(--color-amber)]">no</span>}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {col.is_pk && <Badge variant="info"><Key className="h-2.5 w-2.5" /> PK</Badge>}
+                            {col.is_fk && (
+                              <span className="inline-flex items-center gap-1 text-[10.5px] font-mono text-[var(--color-cyan-soft)]">
+                                <Link2 className="h-2.5 w-2.5" />
+                                {col.fk_target}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -23,8 +23,11 @@ from app.models.schema import (
     Column, Domain, ETLPipeline, Inventory, InventoryFlag, Layer,
     PipelineRunStats, PipelineStep, Procedure, Table,
 )
+from app.agents.annotations import annotate_columns
+from app.agents.rules import extract_rules
 from app.parsers.etl_xml import parse_pipeline as parse_xml_pipeline
 from app.services import gcs
+from app.services import migration as mig
 from app.services import oracle as ora
 
 log = logging.getLogger(__name__)
@@ -174,7 +177,24 @@ async def run(req: RunRequest, results, emit: EmitFn) -> None:
                 ),
             ))
 
-    # ─── 4. Heuristic flags ─────────────────────────────────────────────
+    # ─── 4. Migration signals that don't need lineage ─────────────────
+    inv.multi_writers = mig.compute_multi_writers(inv)
+    if inv.multi_writers:
+        await log_event(emit, AgentName.INVENTORY, f"Multi-writer targets: {len(inv.multi_writers)}")
+
+    # ─── 5. Gemini-powered passes ─────────────────────────────────────
+    try:
+        await annotate_columns(inv, emit)
+    except Exception as e:  # noqa: BLE001
+        log.warning("column annotations failed: %s", e)
+        await log_event(emit, AgentName.INVENTORY, f"Column annotations skipped: {e}")
+    try:
+        await extract_rules(inv, emit)
+    except Exception as e:  # noqa: BLE001
+        log.warning("rule extraction failed: %s", e)
+        await log_event(emit, AgentName.INVENTORY, f"Rule extraction skipped: {e}")
+
+    # ─── 6. Heuristic flags ───────────────────────────────────────────
     inv.flags = _build_flags(inv)
 
     last_result = inv
@@ -185,6 +205,11 @@ async def run(req: RunRequest, results, emit: EmitFn) -> None:
             "pipelines": len(inv.pipelines),
             "orphan_runs": len(inv.orphan_runs),
             "flags": len(inv.flags),
+            "multi_writers": len(inv.multi_writers),
+            "rules": len(inv.rules),
+            "annotated_columns": sum(
+                1 for t in inv.tables for c in t.columns if c.annotation_notes
+            ),
             "by_layer": _count_by(inv.tables, lambda t: t.layer.value),
             "by_domain": _count_by(inv.tables, lambda t: t.domain.value),
         },

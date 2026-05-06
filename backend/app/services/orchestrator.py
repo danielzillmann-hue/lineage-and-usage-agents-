@@ -75,6 +75,15 @@ async def _execute(run_id: str, req: RunRequest) -> None:
     if AgentName.LINEAGE in req.agents:
         await _safe(AgentName.LINEAGE, lambda: lineage_agent.run(req, results, _emit(run_id)))
         results.lineage = lineage_agent.last_result
+        # After lineage is built we can compute decommission readiness +
+        # migration sequencing, both of which require the edge set.
+        if results.inventory and results.lineage:
+            try:
+                from app.services import migration as _mig
+                results.inventory.decommission = _mig.compute_decommission(results.inventory, results.lineage)
+                results.inventory.sequencing = _mig.compute_sequencing(results.inventory, results.lineage)
+            except Exception as e:  # noqa: BLE001
+                log.warning("post-lineage migration signals failed: %s", e)
         await store.save_results(run_id, results)
     if AgentName.USAGE in req.agents:
         await _safe(AgentName.USAGE, lambda: usage_agent.run(req, results, _emit(run_id)))

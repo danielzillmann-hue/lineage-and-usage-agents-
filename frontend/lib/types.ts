@@ -76,6 +76,9 @@ export interface RunRequest {
   label?: string;
 }
 
+export type Sensitivity = "pii" | "financial" | "tax" | "internal" | "public";
+export type ColumnNature = "data" | "key" | "audit" | "calculated" | "reference";
+
 export interface Column {
   name: string;
   data_type: string;
@@ -84,6 +87,9 @@ export interface Column {
   is_fk: boolean;
   fk_target?: string | null;
   comment?: string | null;
+  sensitivity: Sensitivity;
+  nature: ColumnNature;
+  annotation_notes?: string | null;
 }
 
 export interface Table {
@@ -153,12 +159,51 @@ export interface OrphanRun {
   runs: PipelineRunStats;
 }
 
+export interface DecommissionAssessment {
+  object_fqn: string;
+  score: number;
+  verdict: "safe" | "review" | "blocked";
+  last_read?: string | null;
+  days_since_last_read?: number | null;
+  downstream_pipeline_count: number;
+  downstream_view_count: number;
+  archive_eligible: boolean;
+  drivers: string[];
+}
+
+export interface MigrationWave {
+  wave: number;
+  description: string;
+  table_fqns: string[];
+  pipeline_names: string[];
+}
+
+export interface BusinessRule {
+  rule_type: "enum" | "range" | "not_null" | "calculated" | "filter" | "constraint";
+  source_object: string;
+  column?: string | null;
+  expression: string;
+  natural_language: string;
+  confidence: number;
+}
+
+export interface MultiWriterTarget {
+  target_fqn: string;
+  writer_pipelines: string[];
+  pattern: "disjoint" | "lifecycle" | "update_back" | "unknown";
+  rationale?: string | null;
+}
+
 export interface Inventory {
   tables: Table[];
   procedures: Procedure[];
   pipelines: ETLPipeline[];
   orphan_runs: OrphanRun[];
   flags: InventoryFlag[];
+  decommission: DecommissionAssessment[];
+  sequencing: MigrationWave[];
+  rules: BusinessRule[];
+  multi_writers: MultiWriterTarget[];
 }
 
 export interface LineageEdge {

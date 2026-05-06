@@ -13,6 +13,7 @@ import { InventoryView } from "./InventoryView";
 import { LineageView } from "./LineageView";
 import { UsageView } from "./UsageView";
 import { FindingsView } from "./FindingsView";
+import { MigrationView } from "./MigrationView";
 
 export function ResultsView({ runId }: { runId: string }) {
   const [run, setRun] = useState<Run | null>(null);
@@ -104,6 +105,7 @@ export function ResultsView({ runId }: { runId: string }) {
               <TabsTrigger value="inventory">Inventory</TabsTrigger>
               <TabsTrigger value="lineage">Lineage</TabsTrigger>
               <TabsTrigger value="usage">Usage</TabsTrigger>
+              <TabsTrigger value="migration">Migration</TabsTrigger>
               <TabsTrigger value="findings">
                 Findings
                 {findingCount > 0 && (
@@ -140,6 +142,11 @@ export function ResultsView({ runId }: { runId: string }) {
             <TabsContent value="usage" className="mt-0">
               <div style={{ maxWidth: 1400, margin: "0 auto", padding: "32px 32px 64px" }}>
                 <UsageView usage={results.usage} inventory={results.inventory} />
+              </div>
+            </TabsContent>
+            <TabsContent value="migration" className="mt-0">
+              <div style={{ maxWidth: 1400, margin: "0 auto", padding: "32px 32px 64px" }}>
+                <MigrationView inventory={results.inventory} runId={runId} />
               </div>
             </TabsContent>
             <TabsContent value="findings" className="mt-0">

@@ -29,6 +29,22 @@ class Domain(str, Enum):
     OTHER = "other"
 
 
+class Sensitivity(str, Enum):
+    PII = "pii"             # personal identifying — DOB, name, contact
+    FINANCIAL = "financial" # account balances, holdings, fees, transactions
+    TAX = "tax"             # TFN, tax-related
+    INTERNAL = "internal"   # business but not externally sensitive
+    PUBLIC = "public"       # safe to share
+
+
+class ColumnNature(str, Enum):
+    DATA = "data"            # business data column (default)
+    KEY = "key"              # identifier (PK or FK)
+    AUDIT = "audit"          # load_dt, created_by, modified_dt, etc.
+    CALCULATED = "calculated" # derived in source via formula/function
+    REFERENCE = "reference"  # lookup/dimension column (small, stable enums)
+
+
 class Column(BaseModel):
     name: str
     data_type: str
@@ -37,6 +53,9 @@ class Column(BaseModel):
     is_fk: bool = False
     fk_target: str | None = None
     comment: str | None = None
+    sensitivity: Sensitivity = Sensitivity.INTERNAL
+    nature: ColumnNature = ColumnNature.DATA
+    annotation_notes: str | None = None  # short LLM rationale
 
 
 class Table(BaseModel):
@@ -115,12 +134,61 @@ class OrphanRun(BaseModel):
     runs: PipelineRunStats
 
 
+class DecommissionAssessment(BaseModel):
+    """Per-object verdict on whether it can be safely decommissioned."""
+    object_fqn: str
+    score: int                    # 0-100 (higher = safer to retire)
+    verdict: str                  # safe | review | blocked
+    last_read: str | None = None
+    days_since_last_read: int | None = None
+    downstream_pipeline_count: int = 0
+    downstream_view_count: int = 0
+    archive_eligible: bool = False  # per Indigo policy: 10y active / 7y exited
+    drivers: list[str] = Field(default_factory=list)
+
+
+class MigrationWave(BaseModel):
+    """One wave in the sequenced migration plan."""
+    wave: int
+    description: str
+    table_fqns: list[str] = Field(default_factory=list)
+    pipeline_names: list[str] = Field(default_factory=list)
+
+
+class BusinessRule(BaseModel):
+    """An embedded business rule discovered in PL/SQL, ETL, or DDL."""
+    rule_type: str  # enum | range | not_null | calculated | filter | constraint
+    source_object: str   # fqn of where the rule was found
+    column: str | None = None
+    expression: str
+    natural_language: str
+    confidence: float = 0.8
+
+
+class MultiWriterTarget(BaseModel):
+    """A target table written by more than one pipeline.
+
+    Mirrors the Transformation Agent's multi_writer_registry classification
+    so it can ingest this directly and skip the single-threaded pre-pass.
+    """
+    target_fqn: str
+    writer_pipelines: list[str] = Field(default_factory=list)
+    pattern: str  # disjoint | lifecycle | update_back | unknown
+    rationale: str | None = None
+
+
 class Inventory(BaseModel):
     tables: list[Table] = Field(default_factory=list)
     procedures: list[Procedure] = Field(default_factory=list)
     pipelines: list[ETLPipeline] = Field(default_factory=list)
-    orphan_runs: list[OrphanRun] = Field(default_factory=list)  # audit log entries with no matching XML
+    orphan_runs: list[OrphanRun] = Field(default_factory=list)  # audit-log entries with no XML
     flags: list[InventoryFlag] = Field(default_factory=list)
+
+    # Migration-program signals
+    decommission: list[DecommissionAssessment] = Field(default_factory=list)
+    sequencing: list[MigrationWave] = Field(default_factory=list)
+    rules: list[BusinessRule] = Field(default_factory=list)
+    multi_writers: list[MultiWriterTarget] = Field(default_factory=list)
 
 
 class LineageEdge(BaseModel):
