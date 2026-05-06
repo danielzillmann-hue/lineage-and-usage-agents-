@@ -1,16 +1,27 @@
 import { cn } from "@/lib/utils";
 
-export function Progress({ value, className, indeterminate }: { value?: number; className?: string; indeterminate?: boolean }) {
+export function Progress({
+  value, className, indeterminate,
+}: { value?: number; className?: string; indeterminate?: boolean }) {
   return (
-    <div className={cn("h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-bg-elev-2)]", className)}>
-      {indeterminate ? (
-        <div className="h-full w-1/3 shimmer rounded-full" />
-      ) : (
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-[var(--color-navy-500)] via-[var(--color-cyan-soft)] to-[var(--color-cyan-accent)] transition-[width] duration-500"
-          style={{ width: `${Math.max(0, Math.min(100, value ?? 0))}%` }}
-        />
-      )}
+    <div
+      className={cn("h-1.5 w-full overflow-hidden", className)}
+      style={{
+        background: "var(--bg-sunk)",
+        border: "1px solid var(--line)",
+        borderRadius: 99,
+      }}
+    >
+      <div
+        style={{
+          width: indeterminate ? "30%" : `${Math.max(0, Math.min(100, value ?? 0))}%`,
+          height: "100%",
+          background: "var(--brand-emerald)",
+          borderRadius: 99,
+          transition: "width 0.5s",
+          animation: indeterminate ? "shimmer 1.5s linear infinite" : "none",
+        }}
+      />
     </div>
   );
 }

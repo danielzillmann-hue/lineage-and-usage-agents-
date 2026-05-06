@@ -3,39 +3,59 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const button = cva(
-  "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-cyan-accent)] disabled:opacity-50 disabled:cursor-not-allowed select-none",
+  "inline-flex items-center justify-center gap-2 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed select-none cursor-pointer",
   {
     variants: {
       variant: {
-        primary:
-          "bg-gradient-to-b from-[var(--color-cyan-accent)] to-[#0099d4] text-[#001520] shadow-[0_8px_24px_-8px_rgba(0,180,240,0.6)] hover:brightness-110 active:brightness-95",
-        secondary:
-          "bg-[var(--color-bg-elev-2)] text-white border border-[var(--color-border)] hover:bg-[var(--color-bg-elev-3)] hover:border-[var(--color-navy-500)]",
-        ghost:
-          "text-[var(--color-fg-muted)] hover:text-white hover:bg-white/5",
-        outline:
-          "border border-[var(--color-border)] text-white hover:border-[var(--color-cyan-accent)] hover:text-[var(--color-cyan-soft)]",
-        destructive:
-          "bg-[var(--color-rose)] text-white hover:brightness-110",
+        primary: "",
+        secondary: "",
+        ghost: "",
+        outline: "",
+        destructive: "",
       },
       size: {
-        sm: "h-8 px-3 text-[12px]",
-        md: "h-9 px-4 text-[13px]",
-        lg: "h-11 px-6 text-[14px]",
-        icon: "h-9 w-9",
+        sm: "",
+        md: "",
+        lg: "",
+        icon: "",
       },
     },
     defaultVariants: { variant: "primary", size: "md" },
   },
 );
 
+const VARIANTS: Record<string, React.CSSProperties> = {
+  primary:     { background: "var(--brand-ink)", color: "#FFFFFF", border: "1px solid var(--brand-ink)" },
+  secondary:   { background: "var(--bg-elev)", color: "var(--ink)", border: "1px solid var(--line)" },
+  ghost:       { background: "transparent", color: "var(--ink-2)", border: "1px solid transparent" },
+  outline:     { background: "transparent", color: "var(--ink)", border: "1px solid var(--line)" },
+  destructive: { background: "var(--crit)", color: "#FFFFFF", border: "1px solid var(--crit)" },
+};
+
+const SIZES: Record<string, React.CSSProperties> = {
+  sm:   { fontSize: 12, padding: "6px 10px", borderRadius: "var(--r-md)", height: 28 },
+  md:   { fontSize: 14, padding: "8px 14px", borderRadius: "var(--r-md)", height: 36 },
+  lg:   { fontSize: 14, padding: "10px 18px", borderRadius: "var(--r-md)", height: 42, fontWeight: 500 },
+  icon: { padding: 0, borderRadius: "var(--r-md)", height: 36, width: 36 },
+};
+
 export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof button> {}
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, ...props }, ref) => (
-    <button ref={ref} className={cn(button({ variant, size }), className)} {...props} />
+  ({ className, variant, size, style, ...props }, ref) => (
+    <button
+      ref={ref}
+      className={cn(button({ variant, size }), className)}
+      style={{
+        fontFamily: "var(--font-sans)",
+        ...VARIANTS[variant ?? "primary"],
+        ...SIZES[size ?? "md"],
+        ...style,
+      }}
+      {...props}
+    />
   ),
 );
 Button.displayName = "Button";

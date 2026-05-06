@@ -19,20 +19,21 @@ export function Switch({ checked, onCheckedChange, disabled, id, className }: Sw
       aria-checked={checked}
       disabled={disabled}
       onClick={() => onCheckedChange(!checked)}
-      className={cn(
-        "relative inline-flex h-5 w-9 items-center rounded-full border transition",
-        checked
-          ? "bg-gradient-to-r from-[var(--color-cyan-accent)] to-[#0099d4] border-[var(--color-cyan-accent)]"
-          : "bg-[var(--color-bg-elev-2)] border-[var(--color-border)]",
-        disabled && "opacity-50 cursor-not-allowed",
-        className,
-      )}
+      className={cn("relative inline-flex h-5 w-9 items-center rounded-full transition-colors", className)}
+      style={{
+        background: checked ? "var(--brand-emerald)" : "var(--bg-sunk)",
+        border: `1px solid ${checked ? "var(--brand-emerald-700)" : "var(--line)"}`,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1,
+      }}
     >
       <span
-        className={cn(
-          "inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform",
-          checked ? "translate-x-[18px]" : "translate-x-[3px]",
-        )}
+        className={cn("inline-block h-3.5 w-3.5 rounded-full transition-transform")}
+        style={{
+          background: "#FFFFFF",
+          transform: `translateX(${checked ? "18px" : "3px"})`,
+          boxShadow: "0 1px 2px rgba(0,0,0,0.15)",
+        }}
       />
     </button>
   );

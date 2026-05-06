@@ -2,10 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Download, Loader2 } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
-import { Button } from "@/components/ui/Button";
-import { Badge } from "@/components/ui/Badge";
 import { api } from "@/lib/api";
 import { relativeTime } from "@/lib/utils";
 import type { Run, RunResults } from "@/lib/types";
@@ -28,68 +26,130 @@ export function ResultsView({ runId }: { runId: string }) {
 
   if (!run || !results) {
     return (
-      <div className="flex items-center gap-3 text-[var(--color-fg-muted)]">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Loading results…
+      <div className="px-8 py-16 flex items-center gap-3" style={{ color: "var(--ink-3)" }}>
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading results…
       </div>
     );
   }
 
+  const findingCount = results.summary?.findings.length ?? 0;
+  const path = run.bucket ? `${run.bucket}${run.prefix ? "/" + run.prefix : ""}` : (run.oracle_dsn ?? "");
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-        <div>
-          <Link href={`/runs/${runId}`} className="inline-flex items-center gap-1 text-[12px] text-[var(--color-fg-subtle)] hover:text-white transition mb-2">
-            <ArrowLeft className="h-3 w-3" /> Back to run
-          </Link>
-          <h1 className="text-[28px] font-semibold tracking-tight text-white text-balance">
-            {results.summary?.headline ?? "Analysis complete"}
-          </h1>
-          <div className="mt-2 flex items-center gap-3 text-[12px] text-[var(--color-fg-muted)]">
-            <Badge variant={run.status === "completed" ? "ok" : "warn"}>{run.status}</Badge>
-            <span className="font-mono">{run.bucket}{run.prefix && `/${run.prefix}`}</span>
-            <span>· {relativeTime(run.created_at)}</span>
+    <div className="flex-1 flex flex-col" style={{ background: "var(--bg)" }}>
+      {/* ─── Run header strip ─────────────────────────────── */}
+      <div style={{ padding: "28px 32px 0", borderBottom: "1px solid var(--line)", background: "var(--bg-elev)" }}>
+        <div style={{ maxWidth: 1400, margin: "0 auto" }}>
+          {/* Breadcrumbs */}
+          <div
+            style={{
+              display: "flex", alignItems: "center", gap: 10,
+              color: "var(--ink-3)", fontSize: 13, marginBottom: 8,
+            }}
+          >
+            <Link href="/runs" style={{ color: "var(--ink-3)", textDecoration: "none" }}>
+              ← Runs
+            </Link>
+            <span>/</span>
+            <span className="mono" style={{ color: "var(--ink-2)" }}>{runId.slice(0, 8)}</span>
           </div>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" size="md">
-            <Download className="h-3.5 w-3.5" /> Export
-          </Button>
+
+          {/* Headline + meta + export */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 24 }}>
+            <div>
+              <h1
+                className="text-balance"
+                style={{
+                  fontFamily: "var(--font-sans)", fontSize: 28, fontWeight: 500,
+                  lineHeight: 1.2, letterSpacing: "-0.018em", margin: 0, maxWidth: 900,
+                  color: "var(--ink)",
+                }}
+              >
+                {results.summary?.headline ?? "Analysis complete"}
+              </h1>
+              <div
+                style={{
+                  display: "flex", alignItems: "center", gap: 14,
+                  marginTop: 12, fontSize: 13, color: "var(--ink-3)",
+                  flexWrap: "wrap",
+                }}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: run.status === "completed" ? "var(--ok)" : run.status === "failed" ? "var(--crit)" : "var(--warn)" }}>
+                  <span className={`dot ${run.status === "completed" ? "ok" : run.status === "failed" ? "crit" : "warn"}`} />
+                  {run.status}
+                </span>
+                <span>·</span>
+                <span className="mono">{path}</span>
+                <span>·</span>
+                <span>{relativeTime(run.created_at)}</span>
+              </div>
+            </div>
+            <button
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 8,
+                fontSize: 14, padding: "8px 14px",
+                background: "var(--bg-elev)", color: "var(--ink)",
+                border: "1px solid var(--line)", borderRadius: "var(--r-md)",
+                cursor: "pointer", fontWeight: 500,
+              }}
+            >
+              <Download className="h-3.5 w-3.5" strokeWidth={1.25} /> Export
+            </button>
+          </div>
+
+          {/* Tabs strip */}
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList className="mt-6 -mb-px">
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="inventory">Inventory</TabsTrigger>
+              <TabsTrigger value="lineage">Lineage</TabsTrigger>
+              <TabsTrigger value="usage">Usage</TabsTrigger>
+              <TabsTrigger value="findings">
+                Findings
+                {findingCount > 0 && (
+                  <span
+                    className="mono"
+                    style={{
+                      marginLeft: 8, fontSize: 11, padding: "2px 7px",
+                      background: "var(--crit-bg)", color: "var(--crit)",
+                      borderRadius: 99, fontWeight: 500,
+                    }}
+                  >
+                    {findingCount}
+                  </span>
+                )}
+              </TabsTrigger>
+            </TabsList>
+
+            {/* ─── Tab bodies (rendered below the strip) ─── */}
+            <TabsContent value="overview" className="mt-0">
+              <div style={{ maxWidth: 1400, margin: "0 auto", padding: "32px 32px 64px" }}>
+                <ExecutiveSummaryView results={results} />
+              </div>
+            </TabsContent>
+            <TabsContent value="inventory" className="mt-0">
+              <div style={{ maxWidth: 1400, margin: "0 auto", padding: "32px 32px 64px" }}>
+                <InventoryView inventory={results.inventory} />
+              </div>
+            </TabsContent>
+            <TabsContent value="lineage" className="mt-0">
+              <div style={{ marginTop: 0 }}>
+                <LineageView lineage={results.lineage} inventory={results.inventory} />
+              </div>
+            </TabsContent>
+            <TabsContent value="usage" className="mt-0">
+              <div style={{ maxWidth: 1400, margin: "0 auto", padding: "32px 32px 64px" }}>
+                <UsageView usage={results.usage} inventory={results.inventory} />
+              </div>
+            </TabsContent>
+            <TabsContent value="findings" className="mt-0">
+              <div style={{ maxWidth: 1400, margin: "0 auto", padding: "32px 32px 64px" }}>
+                <FindingsView findings={results.summary?.findings ?? []} />
+              </div>
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
-
-      <Tabs value={tab} onValueChange={setTab} className="space-y-5">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="inventory">Inventory</TabsTrigger>
-          <TabsTrigger value="lineage">Lineage</TabsTrigger>
-          <TabsTrigger value="usage">Usage</TabsTrigger>
-          <TabsTrigger value="findings">
-            Findings
-            {results.summary && results.summary.findings.length > 0 && (
-              <span className="ml-1.5 inline-flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-[var(--color-coral)] text-[10px] font-semibold text-white">
-                {results.summary.findings.length}
-              </span>
-            )}
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="overview">
-          <ExecutiveSummaryView results={results} />
-        </TabsContent>
-        <TabsContent value="inventory">
-          <InventoryView inventory={results.inventory} />
-        </TabsContent>
-        <TabsContent value="lineage">
-          <LineageView lineage={results.lineage} inventory={results.inventory} />
-        </TabsContent>
-        <TabsContent value="usage">
-          <UsageView usage={results.usage} inventory={results.inventory} />
-        </TabsContent>
-        <TabsContent value="findings">
-          <FindingsView findings={results.summary?.findings ?? []} />
-        </TabsContent>
-      </Tabs>
     </div>
   );
 }

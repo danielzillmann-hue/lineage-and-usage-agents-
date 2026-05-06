@@ -71,6 +71,7 @@ export interface RunRequest {
   oracle?: OracleConnection;
   bucket?: string;
   prefix?: string;
+  outputs_prefix?: string;
   agents?: AgentName[];
   label?: string;
 }

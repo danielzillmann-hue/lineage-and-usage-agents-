@@ -36,19 +36,15 @@ export function Tabs({
 
 export function TabsList({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
-    <div
-      role="tablist"
-      className={cn(
-        "inline-flex items-center gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elev-1)]/60 p-1",
-        className,
-      )}
-    >
+    <nav role="tablist" className={cn("inline-flex items-center gap-1", className)}>
       {children}
-    </div>
+    </nav>
   );
 }
 
-export function TabsTrigger({ value, className, children }: { value: string; className?: string; children: React.ReactNode }) {
+export function TabsTrigger({
+  value, className, children,
+}: { value: string; className?: string; children: React.ReactNode }) {
   const ctx = React.useContext(TabsCtx)!;
   const active = ctx.value === value;
   return (
@@ -56,20 +52,27 @@ export function TabsTrigger({ value, className, children }: { value: string; cla
       role="tab"
       aria-selected={active}
       onClick={() => ctx.setValue(value)}
-      className={cn(
-        "px-3.5 h-7 rounded-md text-[12.5px] font-medium transition",
-        active
-          ? "bg-[var(--color-bg-elev-3)] text-white shadow-sm border border-[var(--color-navy-500)]"
-          : "text-[var(--color-fg-muted)] hover:text-white",
-        className,
-      )}
+      className={cn("transition-colors cursor-pointer", className)}
+      style={{
+        background: "transparent",
+        border: 0,
+        borderBottom: `2px solid ${active ? "var(--brand-ink)" : "transparent"}`,
+        padding: "12px 14px",
+        fontSize: 14,
+        fontWeight: active ? 500 : 400,
+        color: active ? "var(--ink)" : "var(--ink-3)",
+        marginBottom: -1,
+        fontFamily: "var(--font-sans)",
+      }}
     >
       {children}
     </button>
   );
 }
 
-export function TabsContent({ value, className, children }: { value: string; className?: string; children: React.ReactNode }) {
+export function TabsContent({
+  value, className, children,
+}: { value: string; className?: string; children: React.ReactNode }) {
   const ctx = React.useContext(TabsCtx)!;
   if (ctx.value !== value) return null;
   return <div className={className}>{children}</div>;

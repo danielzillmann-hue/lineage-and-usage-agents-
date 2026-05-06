@@ -1,110 +1,149 @@
 @import "tailwindcss";
 
 /* ───────────────────────────────────────────────────────────────────────────
-   Insignia × Intelia design tokens
-   Primary navy + Insignia mid-blue + vibrant cyan + warm coral.
-   Dark mode default — premium technical feel for the demo.
+   intelia · Lineage Agents — Direction 01 "Calm Console"
+   Warm off-white surface, single emerald accent, borders not shadows.
 ─────────────────────────────────────────────────────────────────────────── */
 
-@theme {
-  /* Brand */
-  --color-navy-50:  #eef1f7;
-  --color-navy-100: #d6dcec;
-  --color-navy-200: #aab6d4;
-  --color-navy-300: #7d8fbb;
-  --color-navy-400: #506aa3;
-  --color-navy-500: #285294;
-  --color-navy-600: #1f4179;
-  --color-navy-700: #18335f;
-  --color-navy-800: #102447;
-  --color-navy-900: #0a1830;
-  --color-navy-950: #050d1d;
-
-  --color-cyan-accent: #00b4f0;
-  --color-cyan-soft:   #7ebcf9;
-  --color-coral:       #ff6b47;
-  --color-amber:       #f6b400;
-  --color-emerald:     #18c29c;
-  --color-rose:        #f4476b;
-
-  --color-bg:          #060b1a;
-  --color-bg-elev-1:   #0c1530;
-  --color-bg-elev-2:   #111a3a;
-  --color-bg-elev-3:   #1a2550;
-  --color-border:      #1f2c5a;
-  --color-border-soft: #16204a;
-  --color-fg:          #e7ecf6;
-  --color-fg-muted:    #97a3c2;
-  --color-fg-subtle:   #6471a0;
-
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-  --font-mono: var(--font-geist-mono), ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
-}
-
 :root {
-  color-scheme: dark;
-  --background: var(--color-bg);
-  --foreground: var(--color-fg);
+  /* Brand */
+  --brand-emerald: #0FB37A;
+  --brand-emerald-700: #0A8A5C;
+  --brand-emerald-100: #D7F2E6;
+  --brand-mint: #7FD9B5;
+  --brand-ink: #0F1F2C;
+
+  /* Neutrals — warm light */
+  --bg: #FAFAF7;
+  --bg-elev: #FFFFFF;
+  --bg-sunk: #F4F3EE;
+  --line: #E7E5DE;
+  --line-strong: #D4D1C7;
+  --ink: #0F1F2C;
+  --ink-2: #3B4A57;
+  --ink-3: #6B7884;
+  --ink-4: #97A2AC;
+
+  /* Semantic */
+  --ok: #0FB37A;
+  --warn: #C77B0A;
+  --warn-bg: #FBF1DE;
+  --crit: #C0362C;
+  --crit-bg: #F8E3DF;
+  --info: #2E6FB4;
+
+  /* Radius / shadow */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+  --shadow-1: 0 1px 0 rgba(15,31,44,0.04), 0 1px 2px rgba(15,31,44,0.04);
+  --shadow-2: 0 1px 0 rgba(15,31,44,0.04), 0 4px 14px rgba(15,31,44,0.06);
+
+  /* Compatibility aliases for the previous dark-theme token names. Lets
+     legacy components render correctly with the new palette while we migrate
+     them gradually. */
+  --color-border: var(--line);
+  --color-border-soft: var(--line);
+  --color-bg: var(--bg);
+  --color-bg-elev-1: var(--bg-elev);
+  --color-bg-elev-2: var(--bg-sunk);
+  --color-bg-elev-3: var(--bg-sunk);
+  --color-fg: var(--ink);
+  --color-fg-muted: var(--ink-2);
+  --color-fg-subtle: var(--ink-3);
+  --color-cyan-accent: var(--brand-emerald);
+  --color-cyan-soft: var(--brand-emerald-700);
+  --color-navy-500: var(--brand-emerald);
+  --color-emerald: var(--ok);
+  --color-amber: var(--warn);
+  --color-rose: var(--crit);
+  --color-coral: var(--warn);
 }
+
+[data-theme="dark"] {
+  --bg: #0B1419;
+  --bg-elev: #101C22;
+  --bg-sunk: #081015;
+  --line: #1B2A33;
+  --line-strong: #253742;
+  --ink: #E7EEF1;
+  --ink-2: #B6C3CB;
+  --ink-3: #7E8E97;
+  --ink-4: #56666F;
+  --brand-emerald-100: #0E2A22;
+  --warn-bg: #2A1E0E;
+  --crit-bg: #2A1714;
+  --shadow-1: 0 1px 0 rgba(0,0,0,0.4);
+  --shadow-2: 0 1px 0 rgba(0,0,0,0.4), 0 8px 24px rgba(0,0,0,0.4);
+}
+
+@theme {
+  --color-bg: var(--bg);
+  --color-bg-elev: var(--bg-elev);
+  --color-bg-sunk: var(--bg-sunk);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-brand-emerald: var(--brand-emerald);
+  --color-brand-emerald-700: var(--brand-emerald-700);
+  --color-brand-emerald-100: var(--brand-emerald-100);
+  --color-brand-mint: var(--brand-mint);
+  --color-brand-ink: var(--brand-ink);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-crit: var(--crit);
+  --color-crit-bg: var(--crit-bg);
+  --color-info: var(--info);
+  --font-sans: var(--font-inter-tight), "Inter Tight", "Inter", -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-serif: var(--font-source-serif), "Source Serif 4", Georgia, serif;
+}
+
+* { box-sizing: border-box; }
 
 html, body {
-  background: var(--background);
-  color: var(--foreground);
   font-family: var(--font-sans);
+  color: var(--ink);
+  background: var(--bg);
+  font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+  text-rendering: geometricPrecision;
 }
 
-body {
-  background:
-    radial-gradient(1200px 600px at 12% -10%, rgba(40, 82, 148, 0.30), transparent 60%),
-    radial-gradient(900px 500px at 100% 110%, rgba(0, 180, 240, 0.10), transparent 55%),
-    var(--color-bg);
-  min-height: 100vh;
+.mono { font-family: var(--font-mono); font-feature-settings: "zero", "ss01"; }
+.serif { font-family: var(--font-serif); font-feature-settings: "lnum"; }
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero", "ss01";
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
 }
 
-/* Subtle grid texture for the hero */
-.bg-grid {
-  background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 36px 36px;
-}
-
-.glass {
-  background: linear-gradient(180deg, rgba(20, 30, 70, 0.65) 0%, rgba(10, 20, 48, 0.55) 100%);
-  backdrop-filter: blur(10px);
-  border: 1px solid var(--color-border);
-}
-
-.gradient-text {
-  background: linear-gradient(135deg, #fff 0%, #7ebcf9 60%, #00b4f0 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
+.dot { width: 8px; height: 8px; border-radius: 99px; display: inline-block; flex-shrink: 0; }
+.dot.ok   { background: var(--ok); }
+.dot.warn { background: var(--warn); }
+.dot.crit { background: var(--crit); }
+.dot.info { background: var(--info); }
+.dot.muted{ background: var(--ink-4); }
 
 .text-balance { text-wrap: balance; }
+.text-pretty  { text-wrap: pretty; }
 
-::selection { background: rgba(0, 180, 240, 0.35); color: #fff; }
+::selection { background: rgba(15, 179, 122, 0.25); color: var(--ink); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 6px; }
-::-webkit-scrollbar-thumb:hover { background: var(--color-navy-500); }
-
-@keyframes pulseGlow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 180, 240, 0.45); }
-  50% { box-shadow: 0 0 0 12px rgba(0, 180, 240, 0); }
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 6px;
 }
-.pulse-glow { animation: pulseGlow 2s ease-out infinite; }
-
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-.shimmer {
-  background: linear-gradient(90deg, transparent, rgba(0, 180, 240, 0.18), transparent);
-  background-size: 200% 100%;
-  animation: shimmer 1.6s linear infinite;
-}
+::-webkit-scrollbar-thumb:hover { background: var(--line-strong); }
