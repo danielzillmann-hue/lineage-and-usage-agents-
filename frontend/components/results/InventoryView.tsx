@@ -5,8 +5,9 @@ import { Search } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
-import type { Inventory, Layer } from "@/lib/types";
+import type { Inventory, Layer, Table } from "@/lib/types";
 import { formatNumber } from "@/lib/utils";
+import { TableDetailDrawer } from "./TableDetailDrawer";
 
 const LAYER_TINT: Record<Layer, string> = {
   raw:         "border-[rgba(40,82,148,0.6)] bg-[rgba(40,82,148,0.15)] text-[#a9bad4]",
@@ -20,6 +21,7 @@ const LAYER_TINT: Record<Layer, string> = {
 export function InventoryView({ inventory }: { inventory: Inventory | undefined }) {
   const [q, setQ] = useState("");
   const [layerFilter, setLayerFilter] = useState<Layer | "all">("all");
+  const [selected, setSelected] = useState<Table | null>(null);
 
   const tables = inventory?.tables ?? [];
   const filtered = useMemo(() => {
@@ -78,10 +80,14 @@ export function InventoryView({ inventory }: { inventory: Inventory | undefined 
             </thead>
             <tbody>
               {filtered.map((t) => (
-                <tr key={`${t.schema_name}.${t.name}`} className="border-b border-[var(--color-border-soft)] hover:bg-white/[0.02] transition">
+                <tr
+                  key={`${t.schema_name}.${t.name}`}
+                  onClick={() => setSelected(t)}
+                  className="border-b border-[var(--color-border-soft)] hover:bg-white/[0.02] transition cursor-pointer group"
+                >
                   <td className="px-5 py-2.5 font-mono">
                     <span className="text-[var(--color-fg-subtle)]">{t.schema_name}.</span>
-                    <span className="text-white">{t.name}</span>
+                    <span className="text-white group-hover:text-[var(--color-cyan-soft)]">{t.name}</span>
                   </td>
                   <td className="px-3 py-2.5"><span className={`inline-flex items-center rounded px-2 py-0.5 text-[10.5px] font-medium border ${LAYER_TINT[t.layer]}`}>{t.layer}</span></td>
                   <td className="px-3 py-2.5"><Badge variant="neutral">{t.domain}</Badge></td>
@@ -98,6 +104,11 @@ export function InventoryView({ inventory }: { inventory: Inventory | undefined 
         </div>
       </CardContent>
     </Card>
+    <TableDetailDrawer
+      table={selected}
+      onClose={() => setSelected(null)}
+      pipelines={inventory.pipelines}
+    />
     </div>
   );
 }
