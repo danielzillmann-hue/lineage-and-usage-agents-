@@ -14,12 +14,12 @@ export default function HomePage() {
             Multi-agent · Oracle warehouse · Lineage &amp; usage
           </div>
           <h1 className="text-[44px] md:text-[56px] font-semibold tracking-[-0.02em] leading-[1.05] gradient-text text-balance">
-            Map your warehouse end-to-end. Find what&apos;s actually used.
+            Connect to Oracle. See what&apos;s actually flowing.
           </h1>
           <p className="mt-5 max-w-2xl text-[15px] leading-relaxed text-[var(--color-fg-muted)] text-balance">
-            Three agents read your DDL, data dictionary, and AWR exports — then produce a column-level
-            lineage graph, a usage map, and a findings list with the kind of detail your platform team
-            can act on tomorrow.
+            Four agents introspect your live database, parse the ETL pipelines you already have, and
+            map column-level lineage end-to-end. Surfaces hot tables, broken pipelines, undocumented
+            ETL, and dead weight — in minutes, not weeks.
           </p>
         </div>
       </section>

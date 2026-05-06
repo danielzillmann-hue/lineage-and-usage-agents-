@@ -17,17 +17,27 @@ last_result: ExecutiveSummary | None = None
 
 
 _SUMMARY_PROMPT = """\
-You are presenting findings from a multi-agent analysis of an Oracle data warehouse to a
-technical audience at Insignia Financial. Your job is to write the executive summary.
+You are presenting findings from a multi-agent analysis of an Oracle data
+warehouse + ETL pipelines to a technical audience at Insignia Financial.
 
-Voice: confident, evidence-led, specific. Quote real numbers from the inputs. No fluff.
-Lead with what's surprising, valuable, or actionable. Findings should each name objects.
+You have:
+  - inventory: source tables (with FK relationships), defined ETL pipelines,
+    and CSV outputs each pipeline produces.
+  - lineage: column-level edges from source tables → ETL steps → CSV outputs.
+  - usage: per-pipeline run counts, success/failure rates, last-run, plus any
+    pipeline runs in the audit log that don't have an XML definition.
+
+Lean into ETL governance findings: pipelines that never run, pipelines that
+fail often, undocumented pipelines (audit-log entries with no XML), source
+tables nothing reads, CSV outputs nobody refreshes. Quote specific names and
+exact numbers from the inputs — if you can't quote a number, don't make one
+up.
 
 Output ONLY a JSON object with this shape:
 {
   "headline": "...",
   "bullets": ["...", "..."],
-  "metrics": {"total_tables": 312, "reporting_unreachable_pct": 23.5, ...},
+  "metrics": {"total_tables": 7, "pipelines_total": 10, ...},
   "findings": [
     {"severity": "critical|warn|info", "title": "...", "detail": "...",
      "object_fqns": ["S.T", ...], "recommendation": "..."}
@@ -87,20 +97,34 @@ def _digest(results) -> dict[str, Any]:
         "inventory": {
             "table_count": len(inv.tables),
             "view_count": sum(1 for t in inv.tables if t.kind == "VIEW"),
-            "procedure_count": len(inv.procedures),
+            "csv_outputs": sum(1 for t in inv.tables if t.kind == "CSV"),
+            "pipelines_defined": len(inv.pipelines),
+            "orphan_runs_count": len(inv.orphan_runs),
             "by_layer": _count_by(inv.tables, lambda t: t.layer.value),
             "by_domain": _count_by(inv.tables, lambda t: t.domain.value),
             "flags": [{"severity": f.severity, "title": f.title, "object": f.object_fqn} for f in inv.flags[:50]],
+            "pipelines": [
+                {
+                    "name": p.name, "output": p.output_csv,
+                    "source_tables": p.source_tables, "column_count": p.column_count,
+                    "runs": (p.runs.model_dump() if p.runs else None),
+                } for p in inv.pipelines[:50]
+            ],
+            "orphan_runs": [
+                {"name": o.pipeline_name, "csv": o.csv_generated, "runs": o.runs.model_dump()}
+                for o in inv.orphan_runs[:20]
+            ],
         },
         "lineage": {
             "edges": len(lin.edges),
             "unresolved_objects": lin.unresolved[:30],
-            "table_count": len({e.source_fqn for e in lin.edges} | {e.target_fqn for e in lin.edges}),
+            "by_operation": _count_by(lin.edges, lambda e: e.operation),
         },
         "usage": {
-            "objects_seen": len(use.objects),
+            "pipelines": [p.model_dump() for p in use.pipelines[:30]],
+            "never_run_pipelines": use.never_run_pipelines,
+            "runs_without_definition": use.runs_without_definition,
             "hot_tables": use.hot_tables[:15],
-            "write_only_orphans": use.write_only_orphans[:30],
             "dead_objects": use.dead_objects[:30],
             "reporting_reachable_sources": use.reporting_reachable_sources[:30],
             "reporting_unreachable_sources": use.reporting_unreachable_sources[:30],

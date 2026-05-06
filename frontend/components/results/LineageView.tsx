@@ -17,6 +17,7 @@ const LAYER_COLOR: Record<Layer, string> = {
   staging:     "#7ebcf9",
   integration: "#00b4f0",
   reporting:   "#ff6b47",
+  output:      "#ff6b47",
   unknown:     "#6471a0",
 };
 
@@ -43,6 +44,7 @@ const STYLESHEET: unknown[] = [
   { selector: 'node[layer = "staging"]',     style: { "background-color": LAYER_COLOR.staging, color: "#001520" } },
   { selector: 'node[layer = "integration"]', style: { "background-color": LAYER_COLOR.integration, color: "#001520" } },
   { selector: 'node[layer = "reporting"]',   style: { "background-color": LAYER_COLOR.reporting, color: "#1a0500" } },
+  { selector: 'node[layer = "output"]',      style: { "background-color": LAYER_COLOR.output, color: "#1a0500" } },
   { selector: 'node[layer = "unknown"]',     style: { "background-color": LAYER_COLOR.unknown } },
   { selector: "node[?focused]",              style: { "border-color": "#00b4f0", "border-width": 2.5 } },
   {
@@ -77,6 +79,14 @@ export function LineageView({ lineage, inventory }: { lineage?: LineageGraph; in
     return m;
   }, [inventory]);
 
+  const inferLayer = (fqn: string): Layer => {
+    if (layerByFqn.has(fqn)) return layerByFqn.get(fqn)!;
+    if (fqn.startsWith("SOURCE.")) return "raw";
+    if (fqn.startsWith("OUTPUTS.")) return "output";
+    if (fqn.startsWith("PIPELINE.")) return "integration";
+    return "unknown";
+  };
+
   const elements = useMemo(() => {
     if (!lineage) return [];
     const tables = new Set<string>();
@@ -94,9 +104,9 @@ export function LineageView({ lineage, inventory }: { lineage?: LineageGraph; in
     const nodes = [...visible].map((fqn) => ({
       data: {
         id: fqn,
-        label: fqn.split(".").pop()!,
+        label: fqn.split(".").slice(-2).join("."),
         schema: fqn.split(".")[0],
-        layer: layerByFqn.get(fqn) ?? "unknown",
+        layer: inferLayer(fqn),
         focused: fqn === focus,
       },
     }));

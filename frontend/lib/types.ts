@@ -3,11 +3,35 @@
 export type AgentName = "inventory" | "lineage" | "usage" | "summary";
 export type AgentStatus = "pending" | "running" | "completed" | "failed";
 export type RunStatus = "pending" | "running" | "completed" | "failed";
-export type Layer = "raw" | "staging" | "integration" | "reporting" | "unknown";
+export type Layer = "raw" | "staging" | "integration" | "reporting" | "output" | "unknown";
 export type Domain =
   | "member" | "account" | "product" | "adviser"
-  | "transaction" | "holding" | "fee" | "reference" | "audit" | "other";
+  | "transaction" | "holding" | "fee" | "reference"
+  | "audit" | "investment" | "pipeline" | "other";
 export type Severity = "info" | "warn" | "critical";
+
+export interface OracleConnection {
+  host: string;
+  port: number;
+  service: string;
+  user: string;
+  password: string;
+}
+
+export interface DemoDefaults {
+  oracle: OracleConnection;
+  bucket: string;
+  prefix: string;
+  outputs_prefix: string;
+}
+
+export interface TestConnectionResponse {
+  ok: boolean;
+  schema_name?: string | null;
+  table_count?: number | null;
+  pipeline_runs?: number | null;
+  error?: string | null;
+}
 
 export interface BucketPreview {
   bucket: string;
@@ -15,6 +39,8 @@ export interface BucketPreview {
   ddl_files: number;
   dictionary_files: number;
   awr_files: number;
+  etl_files: number;
+  output_files: number;
   other_files: number;
   total_bytes: number;
   sample_paths: string[];
@@ -31,8 +57,9 @@ export interface AgentRunState {
 
 export interface Run {
   id: string;
-  bucket: string;
-  prefix: string;
+  bucket?: string | null;
+  prefix?: string;
+  oracle_dsn?: string | null;
   label: string | null;
   status: RunStatus;
   created_at: string;
@@ -41,7 +68,8 @@ export interface Run {
 }
 
 export interface RunRequest {
-  bucket: string;
+  oracle?: OracleConnection;
+  bucket?: string;
   prefix?: string;
   agents?: AgentName[];
   label?: string;
@@ -84,9 +112,48 @@ export interface InventoryFlag {
   object_fqn?: string | null;
 }
 
+export interface PipelineRunStats {
+  runs_total: number;
+  runs_success: number;
+  runs_failed: number;
+  first_run?: string | null;
+  last_run?: string | null;
+}
+
+export interface PipelineStep {
+  id: string;
+  kind: string;
+  inputs: string[];
+  columns: string[];
+  operations: string[];
+  source_tables: string[];
+  source_query?: string | null;
+  output_path?: string | null;
+}
+
+export interface ETLPipeline {
+  name: string;
+  file: string;
+  output_csv?: string | null;
+  source_tables: string[];
+  steps: PipelineStep[];
+  column_count: number;
+  runs?: PipelineRunStats | null;
+  connection_host?: string | null;
+  connection_service?: string | null;
+}
+
+export interface OrphanRun {
+  pipeline_name: string;
+  csv_generated?: string | null;
+  runs: PipelineRunStats;
+}
+
 export interface Inventory {
   tables: Table[];
   procedures: Procedure[];
+  pipelines: ETLPipeline[];
+  orphan_runs: OrphanRun[];
   flags: InventoryFlag[];
 }
 
@@ -115,6 +182,17 @@ export interface ObjectUsage {
   last_write?: string | null;
 }
 
+export interface PipelineUsage {
+  pipeline_name: string;
+  runs_total: number;
+  runs_success: number;
+  runs_failed: number;
+  last_run?: string | null;
+  success_rate: number;
+  output_csv?: string | null;
+  has_definition: boolean;
+}
+
 export interface UsageReport {
   objects: ObjectUsage[];
   hot_tables: string[];
@@ -122,6 +200,9 @@ export interface UsageReport {
   dead_objects: string[];
   reporting_reachable_sources: string[];
   reporting_unreachable_sources: string[];
+  pipelines: PipelineUsage[];
+  never_run_pipelines: string[];
+  runs_without_definition: string[];
 }
 
 export interface Finding {

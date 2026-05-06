@@ -1,138 +1,231 @@
-"""Inventory agent — reads DDL + data-dictionary CSVs, builds a schema model.
+"""Inventory agent — introspects the live Oracle DB and parses any ETL XMLs.
 
-Deterministic SQL parsing handles tables/views; Claude classifies layer + domain
-and writes inventory flags (e.g., orphan staging, missing PKs, suspect comments).
+If an Oracle connection is provided we get tables/columns/FKs/row counts/audit
+log directly. If a bucket prefix is provided we additionally scan it for ETL
+XML pipelines (deterministic) and CSV outputs (column inferred from XML load).
+
+Falls back to legacy DDL+CSV-dictionary flow if neither is present.
 """
 
 from __future__ import annotations
 
-import json
+import csv
+import io
 import logging
 from typing import Any
 
 import sqlglot
 from sqlglot import exp
 
-from app.agents.base import EmitFn, log_event, stream_thinking
-from app.config import get_settings
-from app.models.run import AgentName, RunRequest
-from app.models.schema import Column, Domain, Inventory, InventoryFlag, Layer, Procedure, Table
+from app.agents.base import EmitFn, log_event
+from app.models.run import AgentName, RunRequest, StreamEvent
+from app.models.schema import (
+    Column, Domain, ETLPipeline, Inventory, InventoryFlag, Layer,
+    PipelineRunStats, PipelineStep, Procedure, Table,
+)
+from app.parsers.etl_xml import parse_pipeline as parse_xml_pipeline
 from app.services import gcs
+from app.services import oracle as ora
 
 log = logging.getLogger(__name__)
 
 last_result: Inventory | None = None
 
 
-_LAYER_PROMPT = """\
-You are classifying tables in an Oracle data warehouse into layers and domains.
-
-Rules:
-- "raw" — verbatim source extracts; names often contain RAW_, SRC_, _LANDING, _STG_RAW
-- "staging" — cleansed/conformed but not modeled; names often STG_, STAGE_, _STAGING
-- "integration" — dimensional or 3NF integrated model; names often DIM_, FACT_, F_, D_, INT_
-- "reporting" — aggregates/marts feeding BI; names often RPT_, MART_, AGG_, DSH_, _REPORT
-- If unclear, return "unknown".
-
-Domains for a wealth-management warehouse: member, account, product, adviser, transaction, holding, fee, reference, audit, other.
-
-Return ONLY a JSON array of objects: [{"fqn": "SCHEMA.NAME", "layer": "...", "domain": "...", "rationale": "..."}, ...]
-"""
-
-
 async def run(req: RunRequest, results, emit: EmitFn) -> None:
     global last_result
-    await log_event(emit, AgentName.INVENTORY, "Reading DDL and data-dictionary files from GCS")
+    inv = Inventory()
+    oracle_runs: list[ora.PipelineRunStat] = []
 
-    ddl_text, dict_files, proc_files = _gather(req)
-    await log_event(
-        emit,
-        AgentName.INVENTORY,
-        f"Loaded {len(ddl_text)} DDL files, {len(dict_files)} dictionary files, {len(proc_files)} procedure files",
-    )
-
-    tables = _parse_ddl(ddl_text)
-    procedures = _parse_procedures(proc_files)
-    _enrich_from_dictionary(tables, dict_files)
-
-    # Deterministic prefix-based pre-classification — Gemini may refine, but we
-    # always have a meaningful layer/domain even if the LLM is slow or returns junk.
-    for t in tables:
-        t.layer = _heuristic_layer(t)
-        t.domain = _heuristic_domain(t)
-
-    await log_event(
-        emit,
-        AgentName.INVENTORY,
-        f"Parsed {len(tables)} tables/views and {len(procedures)} procedures — refining classification with Gemini",
-    )
-
-    classifications = await _classify_layers_and_domains(tables, emit)
-    by_fqn = {t.fqn: t for t in tables}
-    applied = 0
-    for row in classifications:
-        t = by_fqn.get(str(row.get("fqn", "")).upper())
-        if not t:
-            continue
+    # ─── 1. Live Oracle introspection ───────────────────────────────────
+    if req.oracle:
+        await log_event(emit, AgentName.INVENTORY, f"Connecting to Oracle at {req.oracle.host}:{req.oracle.port}/{req.oracle.service}")
         try:
-            t.layer = Layer(row.get("layer", t.layer.value))
-            applied += 1
-        except (ValueError, AttributeError):
-            pass
-        try:
-            t.domain = Domain(row.get("domain", t.domain.value))
-        except (ValueError, AttributeError):
-            pass
-    await log_event(
-        emit, AgentName.INVENTORY,
-        f"Layer/domain classification: Gemini refined {applied} of {len(tables)} (rest from heuristic)"
-    )
+            conn = ora.OracleConn(
+                host=req.oracle.host, port=req.oracle.port, service=req.oracle.service,
+                user=req.oracle.user, password=req.oracle.password,
+            )
+            snap = ora.snapshot(conn)
+            await log_event(
+                emit, AgentName.INVENTORY,
+                f"Live introspection: schema {snap.schema} · {len(snap.tables)} tables · {len(snap.pipeline_runs)} pipelines in audit log",
+            )
+            for ot in snap.tables:
+                cols = [
+                    Column(
+                        name=c.name, data_type=c.data_type, nullable=c.nullable,
+                        is_pk=c.is_pk, is_fk=c.is_fk, fk_target=c.fk_target,
+                    )
+                    for c in ot.columns
+                ]
+                t = Table(
+                    schema_name=ot.schema, name=ot.name, kind="TABLE", columns=cols,
+                    row_count=ot.row_count, bytes=ot.bytes, last_analyzed=ot.last_analyzed,
+                    layer=_heuristic_layer_from_name(ot.name),
+                    domain=_heuristic_domain_from_name(ot.name),
+                )
+                inv.tables.append(t)
+            oracle_runs = snap.pipeline_runs
+        except Exception as e:  # noqa: BLE001
+            log.exception("oracle introspection failed")
+            await log_event(emit, AgentName.INVENTORY, f"Oracle connection failed: {e}", kind="error")
 
-    flags = _heuristic_flags(tables)
+    # ─── 2. Bucket scan: ETL XMLs + CSV outputs + legacy DDL/dictionary ─
+    if req.bucket:
+        await log_event(emit, AgentName.INVENTORY, f"Scanning bucket gs://{req.bucket}/{req.prefix}")
+        ddl_files: list[tuple[str, str]] = []
+        dict_files: list[tuple[str, str]] = []
+        etl_files: list[tuple[str, str]] = []
+        output_files: list[tuple[str, str]] = []
+        for f in gcs.iter_classified(req.bucket, req.prefix):
+            if f.kind == "ddl":
+                ddl_files.append((f.name, gcs.read_text(req.bucket, f.name)))
+            elif f.kind == "dictionary":
+                dict_files.append((f.name, gcs.read_text(req.bucket, f.name)))
+            elif f.kind == "etl":
+                etl_files.append((f.name, gcs.read_text(req.bucket, f.name)))
+            elif f.kind == "output" or (f.name.lower().endswith(".csv") and "output" in f.name.lower()):
+                output_files.append((f.name, gcs.read_text(req.bucket, f.name)))
 
-    inv = Inventory(tables=tables, procedures=procedures, flags=flags)
-    last_result = inv
-    await emit_result(emit, inv)
-
-
-async def emit_result(emit: EmitFn, inv: Inventory) -> None:
-    from app.models.run import StreamEvent
-
-    await emit(
-        StreamEvent(
-            event="result",
-            agent=AgentName.INVENTORY,
-            data={
-                "tables": len(inv.tables),
-                "procedures": len(inv.procedures),
-                "flags": len(inv.flags),
-                "by_layer": _count_by(inv.tables, lambda t: t.layer.value),
-                "by_domain": _count_by(inv.tables, lambda t: t.domain.value),
-            },
+        await log_event(
+            emit, AgentName.INVENTORY,
+            f"Bucket: {len(etl_files)} ETL XMLs · {len(output_files)} output CSVs · {len(ddl_files)} DDL · {len(dict_files)} dictionary",
         )
+
+        # ETL pipelines
+        for name, text in etl_files:
+            pl = parse_xml_pipeline(text, name)
+            if not pl:
+                continue
+            inv.pipelines.append(_to_inventory_pipeline(pl))
+
+        # CSV outputs — model each as a Table at Layer.OUTPUT, columns from header
+        for name, text in output_files:
+            inv.tables.append(_csv_to_table(name, text))
+
+        # Legacy DDL flow (non-Oracle path) — still useful for DDL-only buckets
+        if ddl_files and not req.oracle:
+            for t in _parse_ddl(ddl_files):
+                t.layer = _heuristic_layer_from_name(t.name)
+                t.domain = _heuristic_domain_from_name(t.name)
+                inv.tables.append(t)
+            await log_event(emit, AgentName.INVENTORY, f"Parsed {len(ddl_files)} DDL files → {sum(1 for t in inv.tables if t.kind in ('TABLE','VIEW'))} objects")
+
+    # ─── 3. Match audit-log runs against XML-defined pipelines ──────────
+    runs = oracle_runs
+    matched: set[str] = set()
+    if runs:
+        runs_by_canonical: dict[str, ora.PipelineRunStat] = {}
+        for r in runs:
+            for k in {r.pipeline_name, _strip_numeric_prefix(r.pipeline_name)}:
+                runs_by_canonical.setdefault(k.lower(), r)
+        for p in inv.pipelines:
+            for k in {p.name, _strip_numeric_prefix(p.name)}:
+                r = runs_by_canonical.get(k.lower())
+                if r:
+                    p.runs = PipelineRunStats(
+                        runs_total=r.runs_total,
+                        runs_success=r.runs_success,
+                        runs_failed=r.runs_failed,
+                        first_run=r.first_run,
+                        last_run=r.last_run,
+                    )
+                    matched.add(r.pipeline_name)
+                    break
+        # Audit-log entries that don't correspond to any defined pipeline
+        for r in runs:
+            if r.pipeline_name in matched:
+                continue
+            stripped = _strip_numeric_prefix(r.pipeline_name)
+            # Don't double-emit a numeric-prefixed run if its bare name was matched
+            if stripped != r.pipeline_name and any(p.name.lower() == stripped.lower() for p in inv.pipelines):
+                continue
+            from app.models.schema import OrphanRun
+            inv.orphan_runs.append(OrphanRun(
+                pipeline_name=r.pipeline_name,
+                csv_generated=r.csv_generated,
+                runs=PipelineRunStats(
+                    runs_total=r.runs_total, runs_success=r.runs_success, runs_failed=r.runs_failed,
+                    first_run=r.first_run, last_run=r.last_run,
+                ),
+            ))
+
+    # ─── 4. Heuristic flags ─────────────────────────────────────────────
+    inv.flags = _build_flags(inv)
+
+    last_result = inv
+    await emit(StreamEvent(
+        event="result", agent=AgentName.INVENTORY,
+        data={
+            "tables": len(inv.tables),
+            "pipelines": len(inv.pipelines),
+            "orphan_runs": len(inv.orphan_runs),
+            "flags": len(inv.flags),
+            "by_layer": _count_by(inv.tables, lambda t: t.layer.value),
+            "by_domain": _count_by(inv.tables, lambda t: t.domain.value),
+        },
+    ))
+
+
+# ─── helpers ──────────────────────────────────────────────────────────────
+
+
+def _to_inventory_pipeline(pl) -> ETLPipeline:
+    """Convert parsers.etl_xml.Pipeline → models.schema.ETLPipeline."""
+    src_tables: list[str] = []
+    for s in pl.steps.values():
+        for t in s.source_tables:
+            if t and t not in src_tables:
+                src_tables.append(t)
+    output_csv = None
+    column_count = 0
+    if pl.load_step_id:
+        load = pl.steps[pl.load_step_id]
+        output_csv = load.output_path
+        column_count = len(load.columns)
+    steps = [
+        PipelineStep(
+            id=s.id, kind=s.kind, inputs=s.inputs, columns=s.columns,
+            operations=s.operations, source_tables=s.source_tables,
+            source_query=s.source_query, output_path=s.output_path,
+        )
+        for s in pl.steps.values()
+    ]
+    return ETLPipeline(
+        name=pl.name,
+        file=pl.file,
+        output_csv=output_csv,
+        source_tables=src_tables,
+        steps=steps,
+        column_count=column_count,
+        connection_host=pl.connection.get("host"),
+        connection_service=pl.connection.get("service"),
     )
 
 
-def _count_by(items, key) -> dict[str, int]:
-    out: dict[str, int] = {}
-    for it in items:
-        k = key(it)
-        out[k] = out.get(k, 0) + 1
-    return out
+def _csv_to_table(blob_name: str, text: str) -> Table:
+    """Read just the CSV header to surface a table-like object at Layer.OUTPUT."""
+    short = blob_name.split("/")[-1]
+    name = short.removesuffix(".csv").upper()
+    cols: list[Column] = []
+    try:
+        reader = csv.reader(io.StringIO(text))
+        header = next(reader, [])
+        # Count rows roughly without loading entire CSV in memory if huge
+        row_count = sum(1 for _ in reader)
+        cols = [Column(name=h.strip().upper(), data_type="STRING", nullable=True) for h in header]
+    except Exception as e:  # noqa: BLE001
+        log.warning("csv parse failed on %s: %s", blob_name, e)
+        row_count = None
+    return Table(
+        schema_name="OUTPUTS", name=name, kind="CSV",
+        columns=cols, row_count=row_count,
+        layer=Layer.OUTPUT, domain=_heuristic_domain_from_name(name),
+        comment=f"CSV produced by ETL pipeline (file: {short})",
+    )
 
 
-def _gather(req: RunRequest) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
-    ddl: list[tuple[str, str]] = []
-    dict_: list[tuple[str, str]] = []
-    procs: list[tuple[str, str]] = []
-    for f in gcs.iter_classified(req.bucket, req.prefix):
-        if f.kind == "ddl":
-            ddl.append((f.name, gcs.read_text(req.bucket, f.name)))
-        elif f.kind == "dictionary":
-            dict_.append((f.name, gcs.read_text(req.bucket, f.name)))
-        elif f.name.lower().endswith(".pls") or "dba_source" in f.name.lower():
-            procs.append((f.name, gcs.read_text(req.bucket, f.name)))
-    return ddl, dict_, procs
+# ─── DDL parser (legacy path) ─────────────────────────────────────────────
 
 
 def _parse_ddl(files: list[tuple[str, str]]) -> list[Table]:
@@ -165,12 +258,9 @@ def _table_from_create(stmt: exp.Create) -> Table | None:
     name = table_ref.name.upper()
     cols: list[Column] = []
     table_pk_columns: set[str] = set()
-
     if isinstance(this, exp.Schema):
-        # First pass: scan table-level constraints for PRIMARY KEY (col, col, ...)
-        # sqlglot wraps `CONSTRAINT name PRIMARY KEY (...)` as Constraint(expressions=[PrimaryKey(...)]).
         for item in this.expressions or []:
-            pk: exp.PrimaryKey | None = None
+            pk = None
             if isinstance(item, exp.PrimaryKey):
                 pk = item
             elif isinstance(item, exp.Constraint):
@@ -181,8 +271,6 @@ def _table_from_create(stmt: exp.Create) -> Table | None:
             if pk:
                 for c in pk.expressions or []:
                     table_pk_columns.add(getattr(c, "name", str(c)).upper())
-
-        # Second pass: build columns; flag PKs from either column- or table-level
         for col in this.expressions or []:
             if not isinstance(col, exp.ColumnDef):
                 continue
@@ -192,158 +280,119 @@ def _table_from_create(stmt: exp.Create) -> Table | None:
                 or (hasattr(c, "kind") and isinstance(c.kind, exp.PrimaryKeyColumnConstraint))
                 for c in constraints
             )
-            cols.append(
-                Column(
-                    name=col.name.upper(),
-                    data_type=col.args.get("kind").sql() if col.args.get("kind") else "UNKNOWN",
-                    nullable=not any(
-                        isinstance(c, exp.NotNullColumnConstraint)
-                        or (hasattr(c, "kind") and isinstance(c.kind, exp.NotNullColumnConstraint))
-                        for c in constraints
-                    ),
-                    is_pk=col_pk or col.name.upper() in table_pk_columns,
-                )
-            )
-
+            cols.append(Column(
+                name=col.name.upper(),
+                data_type=col.args.get("kind").sql() if col.args.get("kind") else "UNKNOWN",
+                nullable=not any(
+                    isinstance(c, exp.NotNullColumnConstraint)
+                    or (hasattr(c, "kind") and isinstance(c.kind, exp.NotNullColumnConstraint))
+                    for c in constraints
+                ),
+                is_pk=col_pk or col.name.upper() in table_pk_columns,
+            ))
     source_text = stmt.expression.sql(dialect="oracle") if stmt.expression else None
     return Table(
-        schema_name=schema_name,
-        name=name,
+        schema_name=schema_name, name=name,
         kind="VIEW" if kind in {"VIEW", "MATERIALIZED VIEW", "MVIEW"} else "TABLE",
-        columns=cols,
-        source_text=source_text,
+        columns=cols, source_text=source_text,
     )
 
 
-def _parse_procedures(files: list[tuple[str, str]]) -> list[Procedure]:
-    procs: list[Procedure] = []
-    for name, text in files:
-        # naive — colleague's dump format will pin this down
-        procs.append(
-            Procedure(
-                schema_name="UNKNOWN",
-                name=name.split("/")[-1].rsplit(".", 1)[0].upper(),
-                kind="PROCEDURE",
-                source=text,
-            )
-        )
-    return procs
+# ─── Heuristics ───────────────────────────────────────────────────────────
 
 
-def _enrich_from_dictionary(tables: list[Table], files: list[tuple[str, str]]) -> None:
-    """If we have ALL_TAB_COLUMNS / DBA_SEGMENTS exports, fill row counts and bytes.
-
-    Format-dependent — finalize once the colleague's extract format is known.
-    """
-    # Placeholder — implementation arrives with extract sample.
-    return
-
-
-_LAYER_RULES: list[tuple[str, Layer]] = [
-    # (token in schema or table name, layer) — first match wins
-    ("WH_RAW.", Layer.RAW),
-    ("WH_STG.", Layer.STAGING),
-    ("WH_DW.", Layer.INTEGRATION),
-    ("WH_RPT.", Layer.REPORTING),
-    ("WH_LEGACY.", Layer.UNKNOWN),
-    ("RAW_", Layer.RAW),
-    ("STG_", Layer.STAGING),
-    ("STAGE_", Layer.STAGING),
-    ("DIM_", Layer.INTEGRATION),
-    ("FACT_", Layer.INTEGRATION),
-    ("F_", Layer.INTEGRATION),
-    ("D_", Layer.INTEGRATION),
-    ("BRIDGE_", Layer.INTEGRATION),
-    ("INT_", Layer.INTEGRATION),
-    ("RPT_", Layer.REPORTING),
-    ("MART_", Layer.REPORTING),
-    ("AGG_", Layer.REPORTING),
-    ("DSH_", Layer.REPORTING),
-    ("V_", Layer.UNKNOWN),  # views — schema prefix usually wins above
-    ("LEG_", Layer.UNKNOWN),
-]
-
-_DOMAIN_HINTS: list[tuple[str, Domain]] = [
-    ("MEMBER", Domain.MEMBER),
-    ("CLIENT", Domain.MEMBER),
-    ("CUSTOMER", Domain.MEMBER),
-    ("INVESTOR", Domain.MEMBER),
-    ("ACCOUNT", Domain.ACCOUNT),
-    ("HOLDING", Domain.HOLDING),
-    ("FUND", Domain.HOLDING),
-    ("PORTFOLIO", Domain.HOLDING),
-    ("TRANSACTION", Domain.TRANSACTION),
-    ("TXN", Domain.TRANSACTION),
-    ("FEE", Domain.FEE),
-    ("ADVISER", Domain.ADVISER),
-    ("ADVISOR", Domain.ADVISER),
-    ("PRODUCT", Domain.PRODUCT),
-    ("DATE", Domain.REFERENCE),
-    ("REF_", Domain.REFERENCE),
-    ("AUDIT", Domain.AUDIT),
-]
-
-
-def _heuristic_layer(t: Table) -> Layer:
-    fqn_upper = t.fqn.upper()
-    name_upper = t.name.upper()
-    for token, layer in _LAYER_RULES:
-        if token in fqn_upper or name_upper.startswith(token):
-            return layer
+def _heuristic_layer_from_name(name: str) -> Layer:
+    n = name.upper()
+    if any(p in n for p in ("RAW_", "STAGE_", "STG_RAW")):
+        return Layer.RAW
+    if n.startswith(("STG_", "STAGE_")):
+        return Layer.STAGING
+    if n.startswith(("DIM_", "FACT_", "F_", "D_", "BRIDGE_", "INT_")):
+        return Layer.INTEGRATION
+    if n.startswith(("RPT_", "MART_", "AGG_", "DSH_")):
+        return Layer.REPORTING
+    # Live super-fund DB: short business names are source/raw tables.
+    if n in {
+        "MEMBERS", "ACCOUNTS", "ACCOUNT_TYPES", "ACCOUNT_INVESTMENTS",
+        "INVESTMENT_OPTIONS", "TRANSACTIONS", "ETL_EXECUTION_LOGS",
+    }:
+        return Layer.RAW
     return Layer.UNKNOWN
 
 
-def _heuristic_domain(t: Table) -> Domain:
-    name_upper = t.name.upper()
+_DOMAIN_HINTS = (
+    ("MEMBER", Domain.MEMBER), ("CLIENT", Domain.MEMBER),
+    ("CUSTOMER", Domain.MEMBER), ("INVESTOR", Domain.MEMBER),
+    ("ACCOUNT", Domain.ACCOUNT),
+    ("HOLDING", Domain.HOLDING), ("FUND", Domain.HOLDING),
+    ("PORTFOLIO", Domain.HOLDING), ("INVESTMENT", Domain.INVESTMENT),
+    ("TRANSACTION", Domain.TRANSACTION), ("TXN", Domain.TRANSACTION),
+    ("FEE", Domain.FEE), ("PENSION", Domain.TRANSACTION),
+    ("CONTRIB", Domain.TRANSACTION), ("TAX", Domain.TRANSACTION),
+    ("ADVISER", Domain.ADVISER), ("ADVISOR", Domain.ADVISER),
+    ("PRODUCT", Domain.PRODUCT),
+    ("ETL", Domain.AUDIT), ("AUDIT", Domain.AUDIT), ("LOG", Domain.AUDIT),
+    ("BALANCE", Domain.ACCOUNT), ("DAILY", Domain.TRANSACTION),
+    ("REF_", Domain.REFERENCE),
+)
+
+
+def _heuristic_domain_from_name(name: str) -> Domain:
+    n = name.upper()
     for token, dom in _DOMAIN_HINTS:
-        if token in name_upper:
+        if token in n:
             return dom
     return Domain.OTHER
 
 
-def _heuristic_flags(tables: list[Table]) -> list[InventoryFlag]:
+def _strip_numeric_prefix(s: str) -> str:
+    parts = s.split("_", 1)
+    if len(parts) == 2 and parts[0].isdigit():
+        return parts[1]
+    return s
+
+
+def _build_flags(inv: Inventory) -> list[InventoryFlag]:
     flags: list[InventoryFlag] = []
-    for t in tables:
+    for t in inv.tables:
         if t.kind == "TABLE" and not any(c.is_pk for c in t.columns):
-            flags.append(
-                InventoryFlag(
-                    severity="warn",
-                    title="Table has no primary key",
-                    detail=f"{t.fqn} has no PK constraint declared in DDL.",
-                    object_fqn=t.fqn,
-                )
-            )
+            flags.append(InventoryFlag(
+                severity="warn",
+                title="Table has no primary key",
+                detail=f"{t.fqn} has no PK constraint declared.",
+                object_fqn=t.fqn,
+            ))
+    # Pipelines that never ran
+    for p in inv.pipelines:
+        if p.runs is None or p.runs.runs_total == 0:
+            flags.append(InventoryFlag(
+                severity="warn",
+                title="Pipeline never executed",
+                detail=f"{p.name} is defined in {p.file} but has no execution history.",
+                object_fqn=p.name,
+            ))
+        elif p.runs.runs_failed > 0 and p.runs.runs_total > 0 and (p.runs.runs_failed / p.runs.runs_total) >= 0.05:
+            pct = 100 * p.runs.runs_failed / p.runs.runs_total
+            flags.append(InventoryFlag(
+                severity="critical" if pct >= 10 else "warn",
+                title=f"Pipeline failure rate {pct:.1f}%",
+                detail=f"{p.name}: {p.runs.runs_failed} of {p.runs.runs_total} runs failed.",
+                object_fqn=p.name,
+            ))
+    # Runs in audit log without a matching XML definition — undocumented ETL
+    for orphan in inv.orphan_runs:
+        flags.append(InventoryFlag(
+            severity="critical",
+            title="Pipeline running without source definition",
+            detail=f"{orphan.pipeline_name} appears in ETL_EXECUTION_LOGS ({orphan.runs.runs_total} runs) but no XML pipeline definition exists. Undocumented ETL is a governance risk.",
+            object_fqn=orphan.pipeline_name,
+        ))
     return flags
 
 
-async def _classify_layers_and_domains(tables: list[Table], emit: EmitFn) -> list[dict[str, Any]]:
-    if not tables:
-        return []
-    payload = [
-        {"fqn": t.fqn, "kind": t.kind, "columns": [c.name for c in t.columns][:10]}
-        for t in tables
-    ]
-    text = await stream_thinking(
-        emit,
-        AgentName.INVENTORY,
-        get_settings().inventory_model,
-        system=_LAYER_PROMPT,
-        user=json.dumps(payload, indent=2),
-        json_mode=True,
-    )
-    try:
-        # response_mime_type=json gives us a clean payload, but be defensive about
-        # responseSchema-less calls returning {"items": [...]} or wrapping in fences.
-        s = text.strip()
-        if s.startswith("```"):
-            s = s.strip("`").lstrip("json").strip()
-        parsed = json.loads(s)
-        if isinstance(parsed, dict):
-            for k in ("items", "results", "tables", "data"):
-                if isinstance(parsed.get(k), list):
-                    return parsed[k]
-            return []
-        return parsed
-    except Exception as e:  # noqa: BLE001
-        log.warning("classification parse failed: %s; first 200=%r", e, text[:200])
-        return []
+def _count_by(items, key) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for it in items:
+        k = key(it)
+        out[k] = out.get(k, 0) + 1
+    return out

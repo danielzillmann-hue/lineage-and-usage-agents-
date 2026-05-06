@@ -1,5 +1,6 @@
 import type {
-  BucketPreview, Run, RunRequest, RunResults, StreamEvent,
+  BucketPreview, DemoDefaults, OracleConnection, Run, RunRequest, RunResults,
+  StreamEvent, TestConnectionResponse,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8080";
@@ -18,6 +19,10 @@ export const api = {
   listBuckets: () => jfetch<string[]>("/api/buckets"),
   previewBucket: (bucket: string, prefix = "") =>
     jfetch<BucketPreview>(`/api/buckets/${encodeURIComponent(bucket)}/preview?prefix=${encodeURIComponent(prefix)}`),
+
+  demoDefaults: () => jfetch<DemoDefaults>("/api/demo-defaults"),
+  testOracle: (conn: OracleConnection) =>
+    jfetch<TestConnectionResponse>("/api/oracle/test", { method: "POST", body: JSON.stringify(conn) }),
 
   createRun: (req: RunRequest) =>
     jfetch<Run>("/api/runs", { method: "POST", body: JSON.stringify(req) }),

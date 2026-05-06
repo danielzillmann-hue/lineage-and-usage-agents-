@@ -23,6 +23,7 @@ app.add_middleware(
 )
 
 app.include_router(buckets.router, prefix="/api/buckets", tags=["buckets"])
+app.include_router(buckets.get_demo_router(), prefix="/api", tags=["demo"])
 app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
 
 

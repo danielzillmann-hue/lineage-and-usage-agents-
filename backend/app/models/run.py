@@ -19,8 +19,19 @@ class AgentStatus(str, Enum):
     FAILED = "failed"
 
 
+class OracleConnection(BaseModel):
+    host: str
+    port: int = 1521
+    service: str
+    user: str
+    password: str
+
+
 class RunRequest(BaseModel):
-    bucket: str
+    # Either or both. Oracle connection is the primary input for the live demo;
+    # the bucket is optional for ETL XMLs and any extracts.
+    oracle: OracleConnection | None = None
+    bucket: str | None = None
     prefix: str = ""
     agents: list[AgentName] = Field(default_factory=lambda: list(AgentName))
     label: str | None = None
@@ -37,8 +48,9 @@ class AgentRunState(BaseModel):
 
 class Run(BaseModel):
     id: str
-    bucket: str
-    prefix: str
+    bucket: str | None = None
+    prefix: str = ""
+    oracle_dsn: str | None = None
     label: str | None = None
     status: Literal["pending", "running", "completed", "failed"] = "pending"
     created_at: datetime
@@ -52,6 +64,8 @@ class BucketPreview(BaseModel):
     ddl_files: int
     dictionary_files: int
     awr_files: int
+    etl_files: int = 0
+    output_files: int = 0
     other_files: int
     total_bytes: int
     sample_paths: list[str]

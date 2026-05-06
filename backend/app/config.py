@@ -25,6 +25,16 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
     log_level: str = Field(default="INFO")
 
+    # Demo-only defaults — pre-filled so users don't fumble with creds in the UI.
+    demo_db_host: str = Field(default="34.151.82.212")
+    demo_db_port: int = Field(default=1521)
+    demo_db_service: str = Field(default="XEPDB1")
+    demo_db_user: str = Field(default="superuser")
+    demo_db_password: str = Field(default="superpassword")
+    demo_etl_bucket: str = Field(default="dan-sandpit-lineage-demo")
+    demo_etl_prefix: str = Field(default="extracts/super-fund/etl/")
+    demo_outputs_prefix: str = Field(default="extracts/super-fund/outputs/")
+
 
 @lru_cache
 def get_settings() -> Settings:

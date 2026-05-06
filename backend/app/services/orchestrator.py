@@ -34,6 +34,7 @@ async def create_run(req: RunRequest) -> Run:
         id=str(uuid.uuid4()),
         bucket=req.bucket,
         prefix=req.prefix,
+        oracle_dsn=(f"{req.oracle.host}:{req.oracle.port}/{req.oracle.service}" if req.oracle else None),
         label=req.label,
         status="pending",
         created_at=now,

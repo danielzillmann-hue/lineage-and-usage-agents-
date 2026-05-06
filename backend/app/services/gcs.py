@@ -15,15 +15,16 @@ log = logging.getLogger(__name__)
 
 
 _DDL_EXT = {".sql", ".ddl"}
-_DICT_HINTS = {"all_tab", "all_view", "all_dependencies", "dba_source", "dictionary", "data_dictionary"}
+_DICT_HINTS = {"all_tab", "all_view", "all_dependencies", "dba_source", "dictionary", "data_dictionary", "dba_segments"}
 _AWR_HINTS = {"awr", "v$sql", "vsql", "dba_hist_sqlstat", "sqlstat", "sql_history"}
+_ETL_EXT = {".xml"}
 
 
 @dataclass
 class ClassifiedFile:
     name: str
     size: int
-    kind: str  # ddl | dictionary | awr | other
+    kind: str  # ddl | dictionary | awr | etl | output | other
 
 
 def _client() -> storage.Client:
@@ -39,10 +40,14 @@ def _classify(name: str) -> str:
     lower = name.lower()
     if any(lower.endswith(ext) for ext in _DDL_EXT):
         return "ddl"
+    if any(lower.endswith(ext) for ext in _ETL_EXT):
+        return "etl"
     if any(hint in lower for hint in _DICT_HINTS):
         return "dictionary"
     if any(hint in lower for hint in _AWR_HINTS):
         return "awr"
+    if lower.endswith(".csv") and "/output" in lower:
+        return "output"
     return "other"
 
 
@@ -55,11 +60,11 @@ def iter_classified(bucket: str, prefix: str = "") -> Iterable[ClassifiedFile]:
 
 
 def preview(bucket: str, prefix: str = "") -> BucketPreview:
-    counts = {"ddl": 0, "dictionary": 0, "awr": 0, "other": 0}
+    counts = {"ddl": 0, "dictionary": 0, "awr": 0, "etl": 0, "output": 0, "other": 0}
     total = 0
     samples: list[str] = []
     for f in iter_classified(bucket, prefix):
-        counts[f.kind] += 1
+        counts[f.kind] = counts.get(f.kind, 0) + 1
         total += f.size
         if len(samples) < 12:
             samples.append(f.name)
@@ -69,6 +74,8 @@ def preview(bucket: str, prefix: str = "") -> BucketPreview:
         ddl_files=counts["ddl"],
         dictionary_files=counts["dictionary"],
         awr_files=counts["awr"],
+        etl_files=counts["etl"],
+        output_files=counts["output"],
         other_files=counts["other"],
         total_bytes=total,
         sample_paths=samples,

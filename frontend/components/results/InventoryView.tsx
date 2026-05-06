@@ -13,6 +13,7 @@ const LAYER_TINT: Record<Layer, string> = {
   staging:     "border-[rgba(126,188,249,0.4)] bg-[rgba(126,188,249,0.12)] text-[#7ebcf9]",
   integration: "border-[rgba(0,180,240,0.4)] bg-[rgba(0,180,240,0.10)] text-[#00b4f0]",
   reporting:   "border-[rgba(255,107,71,0.4)] bg-[rgba(255,107,71,0.10)] text-[#ff6b47]",
+  output:      "border-[rgba(255,107,71,0.4)] bg-[rgba(255,107,71,0.10)] text-[#ff6b47]",
   unknown:     "border-[var(--color-border)] bg-[var(--color-bg-elev-2)] text-[var(--color-fg-subtle)]",
 };
 
@@ -39,6 +40,8 @@ export function InventoryView({ inventory }: { inventory: Inventory | undefined 
   if (!inventory) return <EmptyState message="No inventory data — Inventory agent did not run." />;
 
   return (
+    <div className="space-y-6">
+      {inventory.pipelines.length > 0 && <PipelinesPanel inventory={inventory} />}
     <Card>
       <CardHeader>
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
@@ -90,6 +93,87 @@ export function InventoryView({ inventory }: { inventory: Inventory | undefined 
               {filtered.length === 0 && (
                 <tr><td colSpan={6} className="px-5 py-12 text-center text-[var(--color-fg-muted)]">No objects match.</td></tr>
               )}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+    </div>
+  );
+}
+
+function PipelinesPanel({ inventory }: { inventory: NonNullable<Parameters<typeof InventoryView>[0]["inventory"]> }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>ETL pipelines</CardTitle>
+        <div className="mt-1 text-[12px] text-[var(--color-fg-muted)]">
+          {formatNumber(inventory.pipelines.length)} defined ·{" "}
+          <span className="text-[var(--color-rose)]">{inventory.orphan_runs.length}</span> running without definition
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12.5px]">
+            <thead>
+              <tr className="border-y border-[var(--color-border-soft)] text-[10.5px] uppercase tracking-wider text-[var(--color-fg-subtle)]">
+                <th className="text-left px-5 py-2 font-medium">Pipeline</th>
+                <th className="text-left px-3 py-2 font-medium">Sources</th>
+                <th className="text-left px-3 py-2 font-medium">Output</th>
+                <th className="text-right px-3 py-2 font-medium">Cols</th>
+                <th className="text-right px-3 py-2 font-medium">Runs</th>
+                <th className="text-right px-3 py-2 font-medium">Failures</th>
+                <th className="text-right px-5 py-2 font-medium">Last run</th>
+              </tr>
+            </thead>
+            <tbody>
+              {inventory.pipelines.map((p) => {
+                const failPct = p.runs && p.runs.runs_total > 0 ? (p.runs.runs_failed / p.runs.runs_total) * 100 : 0;
+                return (
+                  <tr key={p.name} className="border-b border-[var(--color-border-soft)] hover:bg-white/[0.02]">
+                    <td className="px-5 py-2.5">
+                      <div className="font-mono text-white">{p.name}</div>
+                      <div className="text-[10.5px] text-[var(--color-fg-subtle)]">{p.file}</div>
+                    </td>
+                    <td className="px-3 py-2.5 text-[11px] font-mono text-[var(--color-fg-muted)]">{p.source_tables.join(", ") || "—"}</td>
+                    <td className="px-3 py-2.5 font-mono text-[var(--color-cyan-soft)]">{p.output_csv || "—"}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-[var(--color-fg-muted)]">{p.column_count}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {p.runs ? (
+                        <span className={p.runs.runs_total === 0 ? "text-[var(--color-amber)]" : "text-white"}>
+                          {p.runs.runs_total}
+                        </span>
+                      ) : <span className="text-[var(--color-amber)]">0</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {p.runs && p.runs.runs_failed > 0 ? (
+                        <span className={failPct >= 10 ? "text-[var(--color-rose)] font-semibold" : "text-[var(--color-amber)]"}>
+                          {p.runs.runs_failed} ({failPct.toFixed(0)}%)
+                        </span>
+                      ) : <span className="text-[var(--color-fg-subtle)]">0</span>}
+                    </td>
+                    <td className="px-5 py-2.5 text-right text-[11px] text-[var(--color-fg-muted)]">
+                      {p.runs?.last_run ? p.runs.last_run.replace("T", " ").slice(0, 16) : "never"}
+                    </td>
+                  </tr>
+                );
+              })}
+              {inventory.orphan_runs.map((o) => (
+                <tr key={o.pipeline_name} className="border-b border-[var(--color-border-soft)] bg-[rgba(244,71,107,0.04)]">
+                  <td className="px-5 py-2.5">
+                    <div className="font-mono text-[var(--color-rose)]">{o.pipeline_name}</div>
+                    <div className="text-[10.5px] text-[var(--color-rose)] opacity-80">no XML definition</div>
+                  </td>
+                  <td className="px-3 py-2.5 text-[var(--color-fg-subtle)]">unknown</td>
+                  <td className="px-3 py-2.5 font-mono text-[var(--color-cyan-soft)]">{o.csv_generated || "—"}</td>
+                  <td className="px-3 py-2.5 text-right text-[var(--color-fg-subtle)]">—</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-white">{o.runs.runs_total}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{o.runs.runs_failed}</td>
+                  <td className="px-5 py-2.5 text-right text-[11px] text-[var(--color-fg-muted)]">
+                    {o.runs.last_run ? o.runs.last_run.replace("T", " ").slice(0, 16) : "—"}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

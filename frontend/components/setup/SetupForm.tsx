@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Database, GitBranch, Activity, Sparkles, ArrowRight, Folder, Loader2,
-  FileText, ScrollText, History,
+  Database, GitBranch, Activity, Sparkles, ArrowRight, Loader2,
+  CheckCircle2, AlertCircle, Plug, Folder,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -12,28 +12,27 @@ import { Switch } from "@/components/ui/Switch";
 import { Badge } from "@/components/ui/Badge";
 import { Input } from "@/components/ui/Input";
 import { api } from "@/lib/api";
-import { formatBytes, formatNumber } from "@/lib/utils";
-import type { AgentName, BucketPreview } from "@/lib/types";
+import type { AgentName, OracleConnection, TestConnectionResponse } from "@/lib/types";
 
 const AGENTS: { id: AgentName; title: string; tagline: string; icon: React.ComponentType<{ className?: string }>; tint: string }[] = [
   {
     id: "inventory",
     title: "Inventory",
-    tagline: "Tables, views, columns, layer + domain classification",
+    tagline: "Live DB introspection — tables, columns, FKs, sizes, audit log",
     icon: Database,
     tint: "from-[#285294] to-[#7ebcf9]",
   },
   {
     id: "lineage",
     title: "Lineage",
-    tagline: "Column-level lineage from views, CTAS, INSERT…SELECT, and PL/SQL",
+    tagline: "Column-level lineage from ETL XML pipelines and FK relationships",
     icon: GitBranch,
     tint: "from-[#7ebcf9] to-[#00b4f0]",
   },
   {
     id: "usage",
     title: "Usage",
-    tagline: "AWR / V$SQL joined onto lineage — hot tables, dead objects, reachability",
+    tagline: "Pipeline run history, success rates, undocumented executions",
     icon: Activity,
     tint: "from-[#00b4f0] to-[#18c29c]",
   },
@@ -48,43 +47,52 @@ const AGENTS: { id: AgentName; title: string; tagline: string; icon: React.Compo
 
 export function SetupForm() {
   const router = useRouter();
-  const [buckets, setBuckets] = useState<string[] | null>(null);
-  const [bucket, setBucket] = useState<string>("");
-  const [prefix, setPrefix] = useState<string>("");
+  const [conn, setConn] = useState<OracleConnection | null>(null);
+  const [bucket, setBucket] = useState("");
+  const [prefix, setPrefix] = useState("");
   const [enabled, setEnabled] = useState<Record<AgentName, boolean>>({
     inventory: true, lineage: true, usage: true, summary: true,
   });
-  const [preview, setPreview] = useState<BucketPreview | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
 
+  // Load demo defaults to pre-fill the form
   useEffect(() => {
-    api.listBuckets().then(setBuckets).catch((e) => setError(String(e)));
+    api.demoDefaults().then((d) => {
+      setConn(d.oracle);
+      setBucket(d.bucket);
+      setPrefix(d.prefix);
+    }).catch((e) => setError(String(e)));
   }, []);
-
-  useEffect(() => {
-    if (!bucket) { setPreview(null); return; }
-    setPreviewLoading(true);
-    const t = setTimeout(() => {
-      api.previewBucket(bucket, prefix).then(setPreview).catch(() => setPreview(null)).finally(() => setPreviewLoading(false));
-    }, 250);
-    return () => clearTimeout(t);
-  }, [bucket, prefix]);
 
   const selectedAgents = useMemo(
     () => (Object.entries(enabled) as [AgentName, boolean][]).filter(([, v]) => v).map(([k]) => k),
     [enabled],
   );
 
-  const canRun = !!bucket && selectedAgents.length > 0 && !submitting;
+  const canRun = !!conn && selectedAgents.length > 0 && !submitting;
+
+  const onTest = async () => {
+    if (!conn) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      setTestResult(await api.testOracle(conn));
+    } catch (e) {
+      setTestResult({ ok: false, error: String(e) });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const onRun = async () => {
-    if (!canRun) return;
+    if (!canRun || !conn) return;
     setSubmitting(true);
     setError(null);
     try {
-      const run = await api.createRun({ bucket, prefix, agents: selectedAgents });
+      const run = await api.createRun({ oracle: conn, bucket, prefix, agents: selectedAgents });
       router.push(`/runs/${run.id}`);
     } catch (e) {
       setError(String(e));
@@ -92,35 +100,92 @@ export function SetupForm() {
     }
   };
 
+  if (!conn) {
+    return (
+      <div className="flex items-center gap-3 text-[var(--color-fg-muted)]">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading defaults…
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div className="lg:col-span-2 space-y-6">
+        {/* ─── Oracle connection (primary) ────────────────────────── */}
         <Card>
           <CardHeader>
-            <CardTitle>Source extract</CardTitle>
-            <CardDescription>Point the agents at a Cloud Storage bucket containing DDL, data-dictionary CSVs, and AWR exports.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <label className="text-[11.5px] uppercase tracking-wider text-[var(--color-fg-subtle)] font-medium">Bucket</label>
-              <BucketSelect buckets={buckets} value={bucket} onChange={setBucket} />
-            </div>
-            <div>
-              <label className="text-[11.5px] uppercase tracking-wider text-[var(--color-fg-subtle)] font-medium">Prefix (optional)</label>
-              <div className="flex items-center gap-2 mt-1.5">
-                <Folder className="h-4 w-4 text-[var(--color-fg-subtle)]" />
-                <Input value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="e.g. extracts/2026-05-12/" />
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Plug className="h-4 w-4 text-[var(--color-cyan-accent)]" /> Oracle connection
+                </CardTitle>
+                <CardDescription>Live introspection — tables, FKs, ETL audit log. No extracts needed.</CardDescription>
               </div>
+              <ConnTestPill result={testResult} testing={testing} />
             </div>
-
-            <BucketPreviewBlock loading={previewLoading} preview={preview} />
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <Field label="Host" className="md:col-span-2">
+                <Input value={conn.host} onChange={(e) => setConn({ ...conn, host: e.target.value })} />
+              </Field>
+              <Field label="Port">
+                <Input type="number" value={conn.port} onChange={(e) => setConn({ ...conn, port: Number(e.target.value || 1521) })} />
+              </Field>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <Field label="Service">
+                <Input value={conn.service} onChange={(e) => setConn({ ...conn, service: e.target.value })} />
+              </Field>
+              <Field label="User">
+                <Input value={conn.user} onChange={(e) => setConn({ ...conn, user: e.target.value })} />
+              </Field>
+              <Field label="Password">
+                <Input type="password" value={conn.password} onChange={(e) => setConn({ ...conn, password: e.target.value })} />
+              </Field>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="text-[11.5px] font-mono text-[var(--color-fg-subtle)]">
+                {conn.host}:{conn.port}/{conn.service} as <span className="text-[var(--color-cyan-soft)]">{conn.user}</span>
+              </div>
+              <Button variant="secondary" size="sm" onClick={onTest} disabled={testing}>
+                {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plug className="h-3.5 w-3.5" />}
+                Test connection
+              </Button>
+            </div>
+            {testResult && (
+              <ConnTestPanel result={testResult} />
+            )}
           </CardContent>
         </Card>
 
+        {/* ─── ETL pipelines (optional) ───────────────────────────── */}
+        <Card>
+          <CardHeader>
+            <CardTitle>ETL pipeline definitions <span className="text-[11px] text-[var(--color-fg-subtle)] font-normal ml-2">optional</span></CardTitle>
+            <CardDescription>GCS bucket containing the XML pipelines for column-level lineage. Leave blank for FK-graph lineage only.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <Field label="Bucket" className="md:col-span-2">
+              <div className="relative">
+                <Database className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)]" />
+                <Input value={bucket} onChange={(e) => setBucket(e.target.value)} className="pl-9" />
+              </div>
+            </Field>
+            <Field label="Prefix">
+              <div className="relative">
+                <Folder className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)]" />
+                <Input value={prefix} onChange={(e) => setPrefix(e.target.value)} className="pl-9" />
+              </div>
+            </Field>
+          </CardContent>
+        </Card>
+
+        {/* ─── Agents ─────────────────────────────────────────────── */}
         <Card>
           <CardHeader>
             <CardTitle>Agents</CardTitle>
-            <CardDescription>Run the full pipeline, or pick individual agents to focus the analysis.</CardDescription>
+            <CardDescription>Run the full pipeline, or pick agents to focus the analysis.</CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {AGENTS.map((a) => (
@@ -143,16 +208,10 @@ export function SetupForm() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2.5 text-[12.5px]">
-              <KV label="Bucket" value={bucket || "—"} />
-              <KV label="Prefix" value={prefix || "(root)"} />
+              <KV label="Database" value={`${conn.host}:${conn.port}/${conn.service}`} mono />
+              <KV label="ETL bucket" value={bucket || "—"} mono />
+              <KV label="Prefix" value={prefix || "(none)"} mono />
               <KV label="Agents" value={`${selectedAgents.length} of ${AGENTS.length}`} />
-              {preview && (
-                <>
-                  <KV label="DDL files" value={String(preview.ddl_files)} />
-                  <KV label="Dictionary files" value={String(preview.dictionary_files)} />
-                  <KV label="AWR files" value={String(preview.awr_files)} />
-                </>
-              )}
             </div>
             {error && (
               <div className="rounded-md border border-[rgba(244,71,107,0.4)] bg-[rgba(244,71,107,0.08)] text-[12px] text-[var(--color-rose)] p-2.5">
@@ -174,66 +233,55 @@ export function SetupForm() {
   );
 }
 
-function KV({ label, value }: { label: string; value: string }) {
+function Field({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
+  return (
+    <div className={className}>
+      <label className="text-[11px] uppercase tracking-wider text-[var(--color-fg-subtle)] font-medium block mb-1.5">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function KV({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border-soft)] pb-2 last:border-0">
       <span className="text-[var(--color-fg-subtle)]">{label}</span>
-      <span className="text-white font-mono truncate max-w-[60%]" title={value}>{value}</span>
+      <span className={`text-white truncate max-w-[60%] ${mono ? "font-mono" : ""}`} title={value}>{value}</span>
     </div>
   );
 }
 
-function BucketSelect({ buckets, value, onChange }: { buckets: string[] | null; value: string; onChange: (v: string) => void }) {
-  return (
-    <div className="relative mt-1.5">
-      <Database className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-subtle)]" />
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg-elev-1)] pl-9 pr-3 text-[13px] text-white outline-none focus:border-[var(--color-cyan-accent)] focus:ring-2 focus:ring-[rgba(0,180,240,0.25)] transition appearance-none"
-      >
-        <option value="" disabled>{buckets === null ? "Loading buckets…" : "Select a bucket"}</option>
-        {(buckets ?? []).map((b) => <option key={b} value={b}>{b}</option>)}
-      </select>
-    </div>
-  );
+function ConnTestPill({ result, testing }: { result: TestConnectionResponse | null; testing: boolean }) {
+  if (testing) return <Badge variant="info"><Loader2 className="h-3 w-3 animate-spin" /> testing</Badge>;
+  if (!result) return null;
+  if (result.ok) return <Badge variant="ok"><CheckCircle2 className="h-3 w-3" /> connected</Badge>;
+  return <Badge variant="crit"><AlertCircle className="h-3 w-3" /> failed</Badge>;
 }
 
-function BucketPreviewBlock({ loading, preview }: { loading: boolean; preview: BucketPreview | null }) {
-  if (loading) {
+function ConnTestPanel({ result }: { result: TestConnectionResponse }) {
+  if (result.ok) {
     return (
-      <div className="rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg-elev-1)]/40 p-4 text-[12.5px] text-[var(--color-fg-muted)] flex items-center gap-2">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Scanning bucket…
+      <div className="rounded-md border border-[rgba(24,194,156,0.4)] bg-[rgba(24,194,156,0.08)] text-[12.5px] text-[var(--color-emerald)] p-3 flex items-start gap-2">
+        <CheckCircle2 className="h-4 w-4 flex-shrink-0 mt-0.5" />
+        <div>
+          <div className="font-medium">Connected to <span className="font-mono">{result.schema_name}</span></div>
+          <div className="text-[11.5px] text-[var(--color-fg-muted)] mt-0.5">
+            {result.table_count} tables · {result.pipeline_runs ?? 0} pipelines tracked in audit log
+          </div>
+        </div>
       </div>
     );
   }
-  if (!preview) return null;
-  const total = preview.ddl_files + preview.dictionary_files + preview.awr_files + preview.other_files;
   return (
-    <div className="rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-elev-1)]/40 p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="text-[12.5px] text-[var(--color-fg-muted)]">
-          <span className="text-white font-medium">{formatNumber(total)}</span> files · {formatBytes(preview.total_bytes)}
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="info"><FileText className="h-3 w-3" /> {preview.ddl_files} DDL</Badge>
-          <Badge variant="ok"><ScrollText className="h-3 w-3" /> {preview.dictionary_files} Dict</Badge>
-          <Badge variant="accent"><History className="h-3 w-3" /> {preview.awr_files} AWR</Badge>
-        </div>
-      </div>
-      {preview.sample_paths.length > 0 && (
-        <div className="text-[11.5px] font-mono text-[var(--color-fg-subtle)] space-y-0.5 max-h-28 overflow-y-auto">
-          {preview.sample_paths.map((p) => <div key={p} className="truncate">{p}</div>)}
-        </div>
-      )}
+    <div className="rounded-md border border-[rgba(244,71,107,0.4)] bg-[rgba(244,71,107,0.08)] text-[12.5px] text-[var(--color-rose)] p-3 flex items-start gap-2">
+      <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+      <div className="font-mono break-words">{result.error}</div>
     </div>
   );
 }
 
 function AgentToggleCard({
-  agent,
-  enabled,
-  onToggle,
+  agent, enabled, onToggle,
 }: {
   agent: (typeof AGENTS)[number];
   enabled: boolean;

@@ -2,10 +2,10 @@
 
 import { useMemo } from "react";
 import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from "recharts";
-import { Activity, AlertTriangle, FileText, ArrowRight } from "lucide-react";
+import { Activity, AlertTriangle, FileText, ArrowRight, AlertCircle, CheckCircle2, PlayCircle, PauseCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import type { Inventory, UsageReport } from "@/lib/types";
+import type { Inventory, PipelineUsage, UsageReport } from "@/lib/types";
 import { formatNumber } from "@/lib/utils";
 
 export function UsageView({ usage, inventory }: { usage?: UsageReport; inventory?: Inventory }) {
@@ -27,9 +27,11 @@ export function UsageView({ usage, inventory }: { usage?: UsageReport; inventory
   const reachable = usage.reporting_reachable_sources.length;
   const unreachable = usage.reporting_unreachable_sources.length;
   const reachPct = reachable + unreachable === 0 ? 0 : (reachable / (reachable + unreachable)) * 100;
+  const hasPipelines = (usage.pipelines?.length ?? 0) > 0;
 
   return (
     <div className="space-y-6">
+      {hasPipelines && <PipelineHealthPanel usage={usage} />}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2">
           <CardHeader>
@@ -119,6 +121,94 @@ export function UsageView({ usage, inventory }: { usage?: UsageReport; inventory
         />
       </div>
     </div>
+  );
+}
+
+function PipelineHealthPanel({ usage }: { usage: UsageReport }) {
+  const sorted = useMemo(
+    () => [...usage.pipelines].sort((a, b) => b.runs_total - a.runs_total),
+    [usage.pipelines],
+  );
+  const total = sorted.length;
+  const neverRun = usage.never_run_pipelines.length;
+  const undocumented = usage.runs_without_definition.length;
+  const failing = sorted.filter((p) => p.runs_total > 0 && p.runs_failed > 0).length;
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-end justify-between flex-wrap gap-3">
+          <div>
+            <CardTitle>Pipeline health</CardTitle>
+            <CardDescription>From <span className="font-mono">ETL_EXECUTION_LOGS</span> on the live database.</CardDescription>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="info"><PlayCircle className="h-3 w-3" /> {total} tracked</Badge>
+            {failing > 0 && <Badge variant="warn"><AlertTriangle className="h-3 w-3" /> {failing} failing</Badge>}
+            {neverRun > 0 && <Badge variant="warn"><PauseCircle className="h-3 w-3" /> {neverRun} never run</Badge>}
+            {undocumented > 0 && <Badge variant="crit"><AlertCircle className="h-3 w-3" /> {undocumented} undocumented</Badge>}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12.5px]">
+            <thead>
+              <tr className="border-y border-[var(--color-border-soft)] text-[10.5px] uppercase tracking-wider text-[var(--color-fg-subtle)]">
+                <th className="text-left px-5 py-2 font-medium">Pipeline</th>
+                <th className="text-right px-3 py-2 font-medium">Runs</th>
+                <th className="text-right px-3 py-2 font-medium">Success</th>
+                <th className="text-right px-3 py-2 font-medium">Fail</th>
+                <th className="text-right px-3 py-2 font-medium">Rate</th>
+                <th className="text-right px-3 py-2 font-medium">Last run</th>
+                <th className="text-left px-5 py-2 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((p) => <PipelineRow key={p.pipeline_name + p.has_definition} p={p} />)}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PipelineRow({ p }: { p: PipelineUsage }) {
+  const failPct = p.runs_total > 0 ? (100 * p.runs_failed) / p.runs_total : 0;
+  const status =
+    !p.has_definition ? "undocumented" :
+    p.runs_total === 0 ? "never run" :
+    failPct >= 10 ? "high failure" :
+    failPct > 0 ? "occasional failure" : "healthy";
+  const statusVariant =
+    status === "undocumented" ? "crit" :
+    status === "high failure" ? "crit" :
+    status === "never run" ? "warn" :
+    status === "occasional failure" ? "warn" : "ok";
+  return (
+    <tr className={`border-b border-[var(--color-border-soft)] hover:bg-white/[0.02] ${!p.has_definition ? "bg-[rgba(244,71,107,0.04)]" : ""}`}>
+      <td className="px-5 py-2.5">
+        <div className={`font-mono ${p.has_definition ? "text-white" : "text-[var(--color-rose)]"}`}>{p.pipeline_name}</div>
+        {p.output_csv && <div className="text-[10.5px] text-[var(--color-fg-subtle)] font-mono">→ {p.output_csv}</div>}
+      </td>
+      <td className="px-3 py-2.5 text-right tabular-nums text-white">{p.runs_total}</td>
+      <td className="px-3 py-2.5 text-right tabular-nums text-[var(--color-emerald)]">{p.runs_success}</td>
+      <td className="px-3 py-2.5 text-right tabular-nums">
+        {p.runs_failed > 0 ? <span className="text-[var(--color-rose)]">{p.runs_failed}</span> : <span className="text-[var(--color-fg-subtle)]">0</span>}
+      </td>
+      <td className="px-3 py-2.5 text-right tabular-nums">
+        {p.runs_total > 0 ? (
+          <span className={failPct >= 10 ? "text-[var(--color-rose)]" : "text-[var(--color-fg-muted)]"}>
+            {p.success_rate.toFixed(0)}%
+          </span>
+        ) : <span className="text-[var(--color-fg-subtle)]">—</span>}
+      </td>
+      <td className="px-3 py-2.5 text-right text-[11px] text-[var(--color-fg-muted)] tabular-nums">
+        {p.last_run ? p.last_run.replace("T", " ").slice(0, 16) : "—"}
+      </td>
+      <td className="px-5 py-2.5"><Badge variant={statusVariant}>{status}</Badge></td>
+    </tr>
   );
 }
 
