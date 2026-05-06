@@ -87,7 +87,7 @@ export function InventoryView({ inventory }: { inventory: Inventory | undefined 
                 >
                   <td className="px-5 py-2.5 font-mono">
                     <span className="text-[var(--color-fg-subtle)]">{t.schema_name}.</span>
-                    <span className="text-white group-hover:text-[var(--color-cyan-soft)]">{t.name}</span>
+                    <span className="text-[var(--ink)] group-hover:text-[var(--color-cyan-soft)]">{t.name}</span>
                   </td>
                   <td className="px-3 py-2.5"><span className={`inline-flex items-center rounded px-2 py-0.5 text-[10.5px] font-medium border ${LAYER_TINT[t.layer]}`}>{t.layer}</span></td>
                   <td className="px-3 py-2.5"><Badge variant="neutral">{t.domain}</Badge></td>
@@ -143,7 +143,7 @@ function PipelinesPanel({ inventory }: { inventory: NonNullable<Parameters<typeo
                 return (
                   <tr key={p.name} className="border-b border-[var(--color-border-soft)] hover:bg-white/[0.02]">
                     <td className="px-5 py-2.5">
-                      <div className="font-mono text-white">{p.name}</div>
+                      <div className="font-mono text-[var(--ink)]">{p.name}</div>
                       <div className="text-[10.5px] text-[var(--color-fg-subtle)]">{p.file}</div>
                     </td>
                     <td className="px-3 py-2.5 text-[11px] font-mono text-[var(--color-fg-muted)]">{p.source_tables.join(", ") || "—"}</td>
@@ -151,7 +151,7 @@ function PipelinesPanel({ inventory }: { inventory: NonNullable<Parameters<typeo
                     <td className="px-3 py-2.5 text-right tabular-nums text-[var(--color-fg-muted)]">{p.column_count}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums">
                       {p.runs ? (
-                        <span className={p.runs.runs_total === 0 ? "text-[var(--color-amber)]" : "text-white"}>
+                        <span className={p.runs.runs_total === 0 ? "text-[var(--color-amber)]" : "text-[var(--ink)]"}>
                           {p.runs.runs_total}
                         </span>
                       ) : <span className="text-[var(--color-amber)]">0</span>}
@@ -178,7 +178,7 @@ function PipelinesPanel({ inventory }: { inventory: NonNullable<Parameters<typeo
                   <td className="px-3 py-2.5 text-[var(--color-fg-subtle)]">unknown</td>
                   <td className="px-3 py-2.5 font-mono text-[var(--color-cyan-soft)]">{o.csv_generated || "—"}</td>
                   <td className="px-3 py-2.5 text-right text-[var(--color-fg-subtle)]">—</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-white">{o.runs.runs_total}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-[var(--ink)]">{o.runs.runs_total}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{o.runs.runs_failed}</td>
                   <td className="px-5 py-2.5 text-right text-[11px] text-[var(--color-fg-muted)]">
                     {o.runs.last_run ? o.runs.last_run.replace("T", " ").slice(0, 16) : "—"}
@@ -199,7 +199,7 @@ function FilterPill({ label, count, active, onClick, tint }: { label: string; co
       onClick={onClick}
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] border transition ${
         active ? (tint ?? "border-[var(--color-cyan-accent)] bg-[rgba(0,180,240,0.10)] text-[var(--color-cyan-soft)]")
-        : "border-[var(--color-border)] text-[var(--color-fg-muted)] hover:text-white"
+        : "border-[var(--color-border)] text-[var(--color-fg-muted)] hover:text-[var(--ink)]"
       }`}
     >
       {label}

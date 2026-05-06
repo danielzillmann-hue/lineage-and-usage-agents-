@@ -9,10 +9,10 @@ import { api } from "@/lib/api";
 import type { AgentName, OracleConnection, TestConnectionResponse } from "@/lib/types";
 
 const AGENTS: { id: AgentName; name: string; desc: string }[] = [
-  { id: "inventory", name: "Inventory",         desc: "Oracle introspection — tables, views, columns, FKs, audit log" },
-  { id: "lineage",   name: "Lineage",           desc: "Column-level lineage from ETL XML pipelines and FK relationships" },
-  { id: "usage",     name: "Usage",             desc: "Pipeline run history, success rates, undocumented executions" },
-  { id: "summary",   name: "Executive summary", desc: "Synthesis: headline, findings, recommendations" },
+  { id: "inventory", name: "Inventory Agent",         desc: "Oracle introspection — tables, views, columns, FKs, audit log" },
+  { id: "lineage",   name: "Lineage Agent",           desc: "Column-level lineage from ETL XML pipelines and FK relationships" },
+  { id: "usage",     name: "Usage Agent",             desc: "Pipeline run history, success rates, undocumented executions" },
+  { id: "summary",   name: "Executive Summary Agent", desc: "Synthesis: headline, findings, recommendations" },
 ];
 
 export function SetupForm() {

@@ -73,7 +73,7 @@ export function UsageView({ usage, inventory }: { usage?: UsageReport; inventory
             <CardDescription>Raw sources that flow to a reporting-layer object.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-[40px] font-semibold tracking-tight text-white tabular-nums leading-none">
+            <div className="text-[40px] font-semibold tracking-tight text-[var(--ink)] tabular-nums leading-none">
               {reachPct.toFixed(0)}<span className="text-[24px] text-[var(--color-fg-muted)]">%</span>
             </div>
             <div className="mt-2 text-[12.5px] text-[var(--color-fg-muted)]">
@@ -194,10 +194,10 @@ function PipelineRow({ p }: { p: PipelineUsage }) {
   return (
     <tr className={`border-b border-[var(--color-border-soft)] hover:bg-white/[0.02] ${rowTint}`}>
       <td className="px-5 py-2.5">
-        <div className={`font-mono ${p.has_definition ? "text-white" : "text-[var(--color-rose)]"}`}>{p.pipeline_name}</div>
+        <div className={`font-mono ${p.has_definition ? "text-[var(--ink)]" : "text-[var(--color-rose)]"}`}>{p.pipeline_name}</div>
         {p.output_csv && <div className="text-[10.5px] text-[var(--color-fg-subtle)] font-mono">→ {p.output_csv}</div>}
       </td>
-      <td className="px-3 py-2.5 text-right tabular-nums text-white">{p.runs_total}</td>
+      <td className="px-3 py-2.5 text-right tabular-nums text-[var(--ink)]">{p.runs_total}</td>
       <td className="px-3 py-2.5 text-right tabular-nums text-[var(--color-emerald)]">{p.runs_success}</td>
       <td className="px-3 py-2.5 text-right tabular-nums">
         {p.runs_failed > 0 ? <span className="text-[var(--color-rose)]">{p.runs_failed}</span> : <span className="text-[var(--color-fg-subtle)]">0</span>}
@@ -237,7 +237,7 @@ function ListCard({
           {items.length === 0 && <div className="px-5 py-6 text-center text-[12.5px] text-[var(--color-fg-muted)]">None.</div>}
           {items.slice(0, 50).map((it) => (
             <div key={it} className="px-5 py-2 flex items-center justify-between text-[12.5px] hover:bg-white/[0.02]">
-              <span className="font-mono text-white truncate">{it}</span>
+              <span className="font-mono text-[var(--ink)] truncate">{it}</span>
               <ArrowRight className="h-3 w-3 text-[var(--color-fg-subtle)] flex-shrink-0" />
             </div>
           ))}

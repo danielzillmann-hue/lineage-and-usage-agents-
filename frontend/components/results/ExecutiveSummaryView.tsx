@@ -41,7 +41,7 @@ export function ExecutiveSummaryView({ results }: { results: RunResults }) {
             <CardDescription>Synthesized by Gemini 2.5 Pro from the agents&apos; outputs.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-[15px] leading-relaxed text-white text-pretty">{sum.headline}</p>
+            <p className="text-[15px] leading-relaxed text-[var(--ink)] text-pretty">{sum.headline}</p>
             <ul className="space-y-2">
               {sum.bullets.map((b, i) => (
                 <li key={i} className="flex items-start gap-2.5 text-[13.5px] leading-relaxed text-[var(--color-fg)]">
@@ -68,7 +68,7 @@ export function ExecutiveSummaryView({ results }: { results: RunResults }) {
               {Object.entries(sum.metrics).map(([k, v]) => (
                 <div key={k} className="rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg-elev-1)]/40 p-3">
                   <div className="text-[10.5px] uppercase tracking-wider text-[var(--color-fg-subtle)]">{k.replaceAll("_", " ")}</div>
-                  <div className="mt-1 text-[18px] font-semibold text-white tabular-nums">{String(v)}</div>
+                  <div className="mt-1 text-[18px] font-semibold text-[var(--ink)] tabular-nums">{String(v)}</div>
                 </div>
               ))}
             </div>
@@ -87,11 +87,11 @@ function MetricCard({ label, value, sub, icon: Icon, tint }: {
       <CardContent className="pt-5">
         <div className="flex items-start justify-between mb-3">
           <div className={`h-9 w-9 rounded-md bg-gradient-to-br ${tint} flex items-center justify-center shadow-md`}>
-            <Icon className="h-4 w-4 text-white drop-shadow" />
+            <Icon className="h-4 w-4 text-[var(--ink)] drop-shadow" />
           </div>
         </div>
         <div className="text-[11.5px] uppercase tracking-wider text-[var(--color-fg-subtle)]">{label}</div>
-        <div className="mt-1 text-[28px] font-semibold tracking-tight text-white tabular-nums">{value}</div>
+        <div className="mt-1 text-[28px] font-semibold tracking-tight text-[var(--ink)] tabular-nums">{value}</div>
         <div className="mt-0.5 text-[11.5px] text-[var(--color-fg-muted)]">{sub}</div>
       </CardContent>
     </Card>
@@ -105,11 +105,11 @@ function DistributionCard({ title, count, description, icon: Icon, tint }: {
     <Card>
       <CardContent className="pt-5">
         <div className="flex items-center justify-between">
-          <div className="text-[12.5px] font-semibold text-white">{title}</div>
+          <div className="text-[12.5px] font-semibold text-[var(--ink)]">{title}</div>
           <Icon className={`h-4 w-4 ${tint}`} />
         </div>
         <div className="mt-1.5 flex items-baseline gap-2">
-          <span className="text-[24px] font-semibold text-white tabular-nums">{count}</span>
+          <span className="text-[24px] font-semibold text-[var(--ink)] tabular-nums">{count}</span>
           <Badge variant="neutral">objects</Badge>
         </div>
         <div className="mt-1 text-[11.5px] text-[var(--color-fg-muted)]">{description}</div>

@@ -64,7 +64,7 @@ export function TableDetailDrawer({ table, onClose, pipelines = [] }: Props) {
               <span>·</span>
               <span>{table.domain}</span>
             </div>
-            <h2 className="text-[22px] font-semibold tracking-tight text-white font-mono break-all">
+            <h2 className="text-[22px] font-semibold tracking-tight text-[var(--ink)] font-mono break-all">
               <span className="text-[var(--color-fg-subtle)]">{table.schema_name}.</span>
               {table.name}
             </h2>
@@ -74,7 +74,7 @@ export function TableDetailDrawer({ table, onClose, pipelines = [] }: Props) {
           </div>
           <button
             onClick={onClose}
-            className="flex-shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-fg-muted)] hover:text-white hover:border-[var(--color-cyan-accent)] transition"
+            className="flex-shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-fg-muted)] hover:text-[var(--ink)] hover:border-[var(--color-cyan-accent)] transition"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -127,7 +127,7 @@ export function TableDetailDrawer({ table, onClose, pipelines = [] }: Props) {
                 <tbody>
                   {table.columns.map((col) => (
                     <tr key={col.name} className="border-t border-[var(--color-border-soft)] hover:bg-white/[0.02]">
-                      <td className="px-3 py-2 font-mono text-white">{col.name}</td>
+                      <td className="px-3 py-2 font-mono text-[var(--ink)]">{col.name}</td>
                       <td className="px-3 py-2 text-[11.5px] font-mono text-[var(--color-fg-muted)]">{col.data_type}</td>
                       <td className="px-2 py-2 text-center text-[11px]">
                         {col.nullable
@@ -173,7 +173,7 @@ function Stat({ label, value, tint }: { label: string; value: string; tint?: str
   return (
     <div>
       <div className="text-[10.5px] uppercase tracking-wider text-[var(--color-fg-subtle)]">{label}</div>
-      <div className={`mt-0.5 text-[18px] font-semibold tabular-nums ${tint ?? "text-white"}`}>{value}</div>
+      <div className={`mt-0.5 text-[18px] font-semibold tabular-nums ${tint ?? "text-[var(--ink)]"}`}>{value}</div>
     </div>
   );
 }
@@ -194,7 +194,7 @@ function PipelineRef({ pipeline, role }: { pipeline: ETLPipeline; role: "reads" 
       <div className="min-w-0">
         <div className="flex items-center gap-2 text-[12.5px]">
           <Badge variant={role === "produces" ? "accent" : "info"}>{role}</Badge>
-          <span className="font-mono text-white truncate">{pipeline.name}</span>
+          <span className="font-mono text-[var(--ink)] truncate">{pipeline.name}</span>
         </div>
         {pipeline.output_csv && (
           <div className="text-[10.5px] font-mono text-[var(--color-fg-subtle)] mt-0.5 truncate">→ {pipeline.output_csv}</div>

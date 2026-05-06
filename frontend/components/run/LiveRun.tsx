@@ -81,7 +81,7 @@ export function LiveRun({ runId }: { runId: string }) {
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
           <div className="text-[11.5px] uppercase tracking-wider text-[var(--color-fg-subtle)]">Run</div>
-          <h1 className="text-[26px] font-semibold tracking-tight text-white mt-1 font-mono">{runId.slice(0, 8)}</h1>
+          <h1 className="text-[26px] font-semibold tracking-tight text-[var(--ink)] mt-1 font-mono">{runId.slice(0, 8)}</h1>
           {run && (
             <div className="mt-2 flex items-center gap-3 text-[12px] text-[var(--color-fg-muted)]">
               <Badge variant={run.status === "completed" ? "ok" : run.status === "failed" ? "crit" : "info"}>
@@ -154,11 +154,11 @@ function AgentCard({ state, result, active }: { state: AgentRunState; result: Re
     }`}>
       <div className="flex items-start gap-3">
         <div className={`flex-shrink-0 h-9 w-9 rounded-md bg-gradient-to-br ${meta.tint} flex items-center justify-center shadow-md`}>
-          <Icon className="h-4 w-4 text-white drop-shadow" />
+          <Icon className="h-4 w-4 text-[var(--ink)] drop-shadow" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
-            <div className="text-[13.5px] font-semibold text-white">{meta.title}</div>
+            <div className="text-[13.5px] font-semibold text-[var(--ink)]">{meta.title}</div>
             {StatusIcon && (
               <StatusIcon className={`h-4 w-4 ${
                 state.status === "completed" ? "text-[var(--color-emerald)]" :
@@ -195,7 +195,7 @@ function TranscriptLine({ entry }: { entry: AgentTranscriptEntry }) {
   return (
     <div className="group flex items-start gap-3 text-[12.5px] leading-relaxed">
       <div className={`flex-shrink-0 mt-0.5 h-5 w-5 rounded bg-gradient-to-br ${meta.tint} flex items-center justify-center`}>
-        <Icon className="h-3 w-3 text-white" />
+        <Icon className="h-3 w-3 text-[var(--ink)]" />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2">
@@ -203,7 +203,7 @@ function TranscriptLine({ entry }: { entry: AgentTranscriptEntry }) {
           {entry.kind === "thinking" && <span className="text-[10px] text-[var(--color-cyan-accent)]">thinking</span>}
           {entry.kind === "error" && <span className="text-[10px] text-[var(--color-rose)]">error</span>}
         </div>
-        <div className={`whitespace-pre-wrap break-words ${entry.kind === "thinking" ? "text-[var(--color-fg-muted)] font-mono text-[11.5px]" : "text-white"}`}>
+        <div className={`whitespace-pre-wrap break-words ${entry.kind === "thinking" ? "text-[var(--color-fg-muted)] font-mono text-[11.5px]" : "text-[var(--ink)]"}`}>
           {entry.text}
         </div>
       </div>

@@ -41,7 +41,7 @@ function FindingCard({ finding }: { finding: Finding }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant={sev.badge}>{finding.severity}</Badge>
-            <span className="text-[14.5px] font-semibold text-white">{finding.title}</span>
+            <span className="text-[14.5px] font-semibold text-[var(--ink)]">{finding.title}</span>
           </div>
           <p className="mt-1 text-[12.5px] text-[var(--color-fg-muted)] leading-relaxed">{finding.detail}</p>
           {finding.object_fqns.length > 0 && (
