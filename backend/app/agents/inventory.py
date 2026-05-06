@@ -152,17 +152,47 @@ def _table_from_create(stmt: exp.Create) -> Table | None:
     schema_name = (table_ref.db or "UNKNOWN").upper()
     name = table_ref.name.upper()
     cols: list[Column] = []
+    table_pk_columns: set[str] = set()
+
     if isinstance(this, exp.Schema):
+        # First pass: scan table-level constraints for PRIMARY KEY (col, col, ...)
+        # sqlglot wraps `CONSTRAINT name PRIMARY KEY (...)` as Constraint(expressions=[PrimaryKey(...)]).
+        for item in this.expressions or []:
+            pk: exp.PrimaryKey | None = None
+            if isinstance(item, exp.PrimaryKey):
+                pk = item
+            elif isinstance(item, exp.Constraint):
+                for sub in item.args.get("expressions") or []:
+                    if isinstance(sub, exp.PrimaryKey):
+                        pk = sub
+                        break
+            if pk:
+                for c in pk.expressions or []:
+                    table_pk_columns.add(getattr(c, "name", str(c)).upper())
+
+        # Second pass: build columns; flag PKs from either column- or table-level
         for col in this.expressions or []:
-            if isinstance(col, exp.ColumnDef):
-                cols.append(
-                    Column(
-                        name=col.name.upper(),
-                        data_type=col.args.get("kind").sql() if col.args.get("kind") else "UNKNOWN",
-                        nullable=not any(isinstance(c, exp.NotNullColumnConstraint) for c in (col.args.get("constraints") or [])),
-                        is_pk=any(isinstance(c, exp.PrimaryKeyColumnConstraint) for c in (col.args.get("constraints") or [])),
-                    )
+            if not isinstance(col, exp.ColumnDef):
+                continue
+            constraints = col.args.get("constraints") or []
+            col_pk = any(
+                isinstance(c, exp.PrimaryKeyColumnConstraint)
+                or (hasattr(c, "kind") and isinstance(c.kind, exp.PrimaryKeyColumnConstraint))
+                for c in constraints
+            )
+            cols.append(
+                Column(
+                    name=col.name.upper(),
+                    data_type=col.args.get("kind").sql() if col.args.get("kind") else "UNKNOWN",
+                    nullable=not any(
+                        isinstance(c, exp.NotNullColumnConstraint)
+                        or (hasattr(c, "kind") and isinstance(c.kind, exp.NotNullColumnConstraint))
+                        for c in constraints
+                    ),
+                    is_pk=col_pk or col.name.upper() in table_pk_columns,
                 )
+            )
+
     source_text = stmt.expression.sql(dialect="oracle") if stmt.expression else None
     return Table(
         schema_name=schema_name,
@@ -215,18 +245,31 @@ def _heuristic_flags(tables: list[Table]) -> list[InventoryFlag]:
 async def _classify_layers_and_domains(tables: list[Table], emit: EmitFn) -> list[dict[str, Any]]:
     if not tables:
         return []
-    payload = [{"fqn": t.fqn, "kind": t.kind, "columns": [c.name for c in t.columns][:10]} for t in tables]
+    payload = [
+        {"fqn": t.fqn, "kind": t.kind, "columns": [c.name for c in t.columns][:10]}
+        for t in tables
+    ]
     text = await stream_thinking(
         emit,
         AgentName.INVENTORY,
         get_settings().inventory_model,
         system=_LAYER_PROMPT,
         user=json.dumps(payload, indent=2),
+        json_mode=True,
     )
     try:
-        start = text.index("[")
-        end = text.rindex("]") + 1
-        return json.loads(text[start:end])
+        # response_mime_type=json gives us a clean payload, but be defensive about
+        # responseSchema-less calls returning {"items": [...]} or wrapping in fences.
+        s = text.strip()
+        if s.startswith("```"):
+            s = s.strip("`").lstrip("json").strip()
+        parsed = json.loads(s)
+        if isinstance(parsed, dict):
+            for k in ("items", "results", "tables", "data"):
+                if isinstance(parsed.get(k), list):
+                    return parsed[k]
+            return []
+        return parsed
     except Exception as e:  # noqa: BLE001
-        log.warning("classification parse failed: %s", e)
+        log.warning("classification parse failed: %s; first 200=%r", e, text[:200])
         return []

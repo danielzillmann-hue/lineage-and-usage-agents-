@@ -39,14 +39,20 @@ async def stream_thinking(
     user: str,
     *,
     location: str | None = None,
+    json_mode: bool = False,
 ) -> str:
-    """Run a Gemini completion with streaming; mirror text deltas to the UI as 'thinking'."""
+    """Run a Gemini completion with streaming; mirror text deltas to the UI as 'thinking'.
+
+    When json_mode is True, asks Gemini to emit application/json so downstream
+    JSON parsing stops fighting prose preambles and code fences.
+    """
     client = gemini(location=location)
     parts: list[str] = []
     cfg = types.GenerateContentConfig(
         system_instruction=system,
         max_output_tokens=8192,
-        temperature=0.3,
+        temperature=0.2 if json_mode else 0.3,
+        response_mime_type="application/json" if json_mode else None,
     )
     stream = await client.aio.models.generate_content_stream(model=model, contents=user, config=cfg)
     async for chunk in stream:

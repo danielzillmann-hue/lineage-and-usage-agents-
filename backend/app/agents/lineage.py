@@ -134,12 +134,21 @@ async def _edges_from_procedure(proc, emit: EmitFn) -> list[LineageEdge]:
         get_settings().lineage_model,
         system=_PROC_PROMPT,
         user=f"Procedure: {proc.schema_name}.{proc.name}\n\nSource:\n{proc.source[:32000]}",
+        json_mode=True,
     )
     try:
-        start = text.index("[")
-        end = text.rindex("]") + 1
-        rows: list[dict[str, Any]] = json.loads(text[start:end])
-        return [LineageEdge.model_validate(r) for r in rows]
+        s = text.strip()
+        if s.startswith("```"):
+            s = s.strip("`").lstrip("json").strip()
+        parsed: Any = json.loads(s)
+        if isinstance(parsed, dict):
+            for k in ("edges", "items", "results", "data"):
+                if isinstance(parsed.get(k), list):
+                    parsed = parsed[k]
+                    break
+            else:
+                return []
+        return [LineageEdge.model_validate(r) for r in parsed]
     except Exception as e:  # noqa: BLE001
         log.warning("proc lineage parse failed for %s: %s", proc.name, e)
         return []

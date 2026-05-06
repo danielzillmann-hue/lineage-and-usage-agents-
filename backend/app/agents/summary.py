@@ -56,12 +56,14 @@ async def run(req: RunRequest, results, emit: EmitFn) -> None:
         system=_SUMMARY_PROMPT,
         user=json.dumps(payload, indent=2),
         location=s.summary_location,
+        json_mode=True,
     )
 
     try:
-        start = text.index("{")
-        end = text.rindex("}") + 1
-        obj: dict[str, Any] = json.loads(text[start:end])
+        raw = text.strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`").lstrip("json").strip()
+        obj: dict[str, Any] = json.loads(raw)
         findings = [Finding.model_validate(f) for f in obj.get("findings", [])]
         summary = ExecutiveSummary(
             headline=obj.get("headline", ""),
@@ -70,7 +72,7 @@ async def run(req: RunRequest, results, emit: EmitFn) -> None:
             metrics=obj.get("metrics", {}),
         )
     except Exception as e:  # noqa: BLE001
-        log.warning("summary parse failed: %s", e)
+        log.warning("summary parse failed: %s; first 200=%r", e, text[:200])
         summary = ExecutiveSummary(headline="Summary parse error", bullets=[text[:600]])
 
     last_result = summary
