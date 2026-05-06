@@ -59,6 +59,8 @@ class OracleTable:
     row_count: int | None
     last_analyzed: str | None
     bytes: int | None
+    kind: str = "TABLE"          # TABLE | VIEW | MVIEW
+    source_text: str | None = None   # populated for views
 
     @property
     def fqn(self) -> str:
@@ -100,7 +102,18 @@ def snapshot(conn: OracleConn) -> OracleSnapshot:
         """)
         table_meta = cur.fetchall()
 
-        # Columns
+        # Views (include source SQL — the lineage agent traces through this)
+        cur.execute("SELECT view_name, text FROM user_views ORDER BY view_name")
+        view_meta = [(name, text) for name, text in cur.fetchall()]
+
+        # Materialized views (if any)
+        try:
+            cur.execute("SELECT mview_name, query FROM user_mviews ORDER BY mview_name")
+            mview_meta = [(name, q) for name, q in cur.fetchall()]
+        except Exception:  # noqa: BLE001
+            mview_meta = []
+
+        # Columns (covers tables, views, mviews — Oracle's user_tab_columns is unified)
         cur.execute("""
             SELECT table_name, column_name, data_type, data_length, nullable
             FROM   user_tab_columns
@@ -142,24 +155,42 @@ def snapshot(conn: OracleConn) -> OracleSnapshot:
                 log.warning("count failed on %s: %s", tn, e)
                 row_counts[tn] = -1
 
-        tables: list[OracleTable] = []
-        for tn, byts, last, num_rows in table_meta:
-            cols: list[OracleColumn] = []
-            for cn, dt, dl, nl in cols_by_table.get(tn, []):
-                fk = fk_map.get((tn, cn))
-                cols.append(OracleColumn(
+        def _build_columns(name: str) -> list[OracleColumn]:
+            out: list[OracleColumn] = []
+            for cn, dt, dl, nl in cols_by_table.get(name, []):
+                fk = fk_map.get((name, cn))
+                out.append(OracleColumn(
                     name=cn,
                     data_type=f"{dt}({dl})" if dl and dt in ("VARCHAR2", "CHAR", "NVARCHAR2") else dt,
                     nullable=(nl == "Y"),
-                    is_pk=(tn, cn) in pk_set,
+                    is_pk=(name, cn) in pk_set,
                     is_fk=fk is not None,
                     fk_target=fk,
                 ))
+            return out
+
+        tables: list[OracleTable] = []
+        for tn, byts, last, num_rows in table_meta:
             tables.append(OracleTable(
-                schema=schema, name=tn, columns=cols,
+                schema=schema, name=tn, columns=_build_columns(tn),
                 row_count=row_counts.get(tn, num_rows),
                 last_analyzed=str(last) if last else None,
                 bytes=int(byts or 0) or None,
+                kind="TABLE",
+            ))
+        for vn, vtext in view_meta:
+            text = vtext.read() if hasattr(vtext, "read") else (vtext or "")
+            tables.append(OracleTable(
+                schema=schema, name=vn, columns=_build_columns(vn),
+                row_count=None, last_analyzed=None, bytes=None,
+                kind="VIEW", source_text=text,
+            ))
+        for mn, mtext in mview_meta:
+            text = mtext.read() if hasattr(mtext, "read") else (mtext or "")
+            tables.append(OracleTable(
+                schema=schema, name=mn, columns=_build_columns(mn),
+                row_count=None, last_analyzed=None, bytes=None,
+                kind="MVIEW", source_text=text,
             ))
 
         # ETL audit log — only if the table exists

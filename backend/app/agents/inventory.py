@@ -59,10 +59,11 @@ async def run(req: RunRequest, results, emit: EmitFn) -> None:
                     for c in ot.columns
                 ]
                 t = Table(
-                    schema_name=ot.schema, name=ot.name, kind="TABLE", columns=cols,
+                    schema_name=ot.schema, name=ot.name, kind=ot.kind, columns=cols,
                     row_count=ot.row_count, bytes=ot.bytes, last_analyzed=ot.last_analyzed,
                     layer=_heuristic_layer_from_name(ot.name),
                     domain=_heuristic_domain_from_name(ot.name),
+                    source_text=ot.source_text,
                 )
                 inv.tables.append(t)
             oracle_runs = snap.pipeline_runs
