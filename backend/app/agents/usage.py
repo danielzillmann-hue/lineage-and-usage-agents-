@@ -49,9 +49,11 @@ async def run(req: RunRequest, results, emit: EmitFn) -> None:
                 success_rate=(100.0 * r.runs_success / r.runs_total) if r and r.runs_total else 0.0,
                 output_csv=p.output_csv,
                 has_definition=True,
+                csv_exists=p.csv_exists,
+                ran_without_logging=p.csv_exists and (not r or r.runs_total == 0),
             )
             pipelines.append(usage)
-            if usage.runs_total == 0:
+            if usage.runs_total == 0 and not p.csv_exists:
                 never_run.append(p.name)
         for o in inv.orphan_runs:
             pipelines.append(PipelineUsage(

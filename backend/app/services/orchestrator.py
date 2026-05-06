@@ -30,6 +30,10 @@ async def emit(run_id: str, event: StreamEvent) -> None:
 
 async def create_run(req: RunRequest) -> Run:
     now = datetime.utcnow()
+    # Auto-fill outputs_prefix to "" (bucket root) when missing — Direnc's
+    # bucket has CSVs at the root, ETL XMLs under pipelines/, so we scan both.
+    if req.bucket and req.outputs_prefix is None:
+        req.outputs_prefix = ""
     run = Run(
         id=str(uuid.uuid4()),
         bucket=req.bucket,

@@ -29,10 +29,13 @@ class OracleConnection(BaseModel):
 
 class RunRequest(BaseModel):
     # Either or both. Oracle connection is the primary input for the live demo;
-    # the bucket is optional for ETL XMLs and any extracts.
+    # the bucket is optional for ETL XMLs and any extracts. outputs_prefix
+    # points at where the pipeline output CSVs live (often a different prefix
+    # in the same bucket).
     oracle: OracleConnection | None = None
     bucket: str | None = None
     prefix: str = ""
+    outputs_prefix: str | None = None  # if None, no separate outputs scan
     agents: list[AgentName] = Field(default_factory=lambda: list(AgentName))
     label: str | None = None
 

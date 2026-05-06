@@ -25,6 +25,7 @@ class ClassifiedFile:
     name: str
     size: int
     kind: str  # ddl | dictionary | awr | etl | output | other
+    updated: str | None = None
 
 
 def _client() -> storage.Client:
@@ -56,7 +57,21 @@ def iter_classified(bucket: str, prefix: str = "") -> Iterable[ClassifiedFile]:
     for blob in client.list_blobs(bucket, prefix=prefix or None):
         if blob.name.endswith("/"):
             continue
-        yield ClassifiedFile(name=blob.name, size=blob.size or 0, kind=_classify(blob.name))
+        yield ClassifiedFile(
+            name=blob.name,
+            size=blob.size or 0,
+            kind=_classify(blob.name),
+            updated=blob.updated.isoformat() if blob.updated else None,
+        )
+
+
+def list_csv_outputs(bucket: str, prefix: str = "") -> list[ClassifiedFile]:
+    """List .csv files at a given prefix as candidate ETL outputs."""
+    out: list[ClassifiedFile] = []
+    for f in iter_classified(bucket, prefix):
+        if f.name.lower().endswith(".csv"):
+            out.append(f)
+    return out
 
 
 def preview(bucket: str, prefix: str = "") -> BucketPreview:

@@ -141,6 +141,9 @@ export interface ETLPipeline {
   runs?: PipelineRunStats | null;
   connection_host?: string | null;
   connection_service?: string | null;
+  csv_exists: boolean;
+  csv_last_modified?: string | null;
+  csv_size_bytes?: number | null;
 }
 
 export interface OrphanRun {
@@ -191,6 +194,8 @@ export interface PipelineUsage {
   success_rate: number;
   output_csv?: string | null;
   has_definition: boolean;
+  csv_exists: boolean;
+  ran_without_logging: boolean;
 }
 
 export interface UsageReport {

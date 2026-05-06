@@ -21,17 +21,25 @@ You are presenting findings from a multi-agent analysis of an Oracle data
 warehouse + ETL pipelines to a technical audience at Insignia Financial.
 
 You have:
-  - inventory: source tables (with FK relationships), defined ETL pipelines,
-    and CSV outputs each pipeline produces.
+  - inventory: source tables (with FK relationships), defined ETL pipelines
+    each annotated with `csv_exists`, `csv_last_modified`, `ran_without_logging`
+    and audit-log run stats; CSV outputs each pipeline produces.
   - lineage: column-level edges from source tables → ETL steps → CSV outputs.
   - usage: per-pipeline run counts, success/failure rates, last-run, plus any
     pipeline runs in the audit log that don't have an XML definition.
 
-Lean into ETL governance findings: pipelines that never run, pipelines that
-fail often, undocumented pipelines (audit-log entries with no XML), source
-tables nothing reads, CSV outputs nobody refreshes. Quote specific names and
-exact numbers from the inputs — if you can't quote a number, don't make one
-up.
+Distinguish three "did this pipeline run" outcomes:
+  1) Audit log shows runs → confirmed; report run count, success rate, last run.
+  2) No audit log entries but `csv_exists: true` → pipeline runs WITHOUT
+     logging; this is a CRITICAL governance finding (the pipeline executes
+     outside the audit framework — observability and SLA tracking can't see it).
+  3) No audit log entries AND `csv_exists: false` → genuinely never run;
+     report as warn (decommissioned candidate).
+
+Other angles to lean into: pipelines that fail often, undocumented executions
+(audit-log entries with no XML), source tables nothing reads, stale CSVs.
+Quote specific names and exact numbers — if you can't quote a number, don't
+make one up.
 
 Output ONLY a JSON object with this shape:
 {
@@ -108,6 +116,11 @@ def _digest(results) -> dict[str, Any]:
                     "name": p.name, "output": p.output_csv,
                     "source_tables": p.source_tables, "column_count": p.column_count,
                     "runs": (p.runs.model_dump() if p.runs else None),
+                    "csv_exists": p.csv_exists,
+                    "csv_last_modified": p.csv_last_modified,
+                    "ran_without_logging": (
+                        p.csv_exists and (p.runs is None or p.runs.runs_total == 0)
+                    ),
                 } for p in inv.pipelines[:50]
             ],
             "orphan_runs": [

@@ -133,6 +133,7 @@ function PipelineHealthPanel({ usage }: { usage: UsageReport }) {
   const neverRun = usage.never_run_pipelines.length;
   const undocumented = usage.runs_without_definition.length;
   const failing = sorted.filter((p) => p.runs_total > 0 && p.runs_failed > 0).length;
+  const offGrid = sorted.filter((p) => p.ran_without_logging).length;
 
   return (
     <Card>
@@ -145,6 +146,7 @@ function PipelineHealthPanel({ usage }: { usage: UsageReport }) {
           <div className="flex flex-wrap gap-2">
             <Badge variant="info"><PlayCircle className="h-3 w-3" /> {total} tracked</Badge>
             {failing > 0 && <Badge variant="warn"><AlertTriangle className="h-3 w-3" /> {failing} failing</Badge>}
+            {offGrid > 0 && <Badge variant="crit"><AlertCircle className="h-3 w-3" /> {offGrid} running off-grid</Badge>}
             {neverRun > 0 && <Badge variant="warn"><PauseCircle className="h-3 w-3" /> {neverRun} never run</Badge>}
             {undocumented > 0 && <Badge variant="crit"><AlertCircle className="h-3 w-3" /> {undocumented} undocumented</Badge>}
           </div>
@@ -178,16 +180,19 @@ function PipelineRow({ p }: { p: PipelineUsage }) {
   const failPct = p.runs_total > 0 ? (100 * p.runs_failed) / p.runs_total : 0;
   const status =
     !p.has_definition ? "undocumented" :
+    p.ran_without_logging ? "running off-grid" :
     p.runs_total === 0 ? "never run" :
     failPct >= 10 ? "high failure" :
     failPct > 0 ? "occasional failure" : "healthy";
   const statusVariant =
     status === "undocumented" ? "crit" :
+    status === "running off-grid" ? "crit" :
     status === "high failure" ? "crit" :
     status === "never run" ? "warn" :
     status === "occasional failure" ? "warn" : "ok";
+  const rowTint = !p.has_definition || p.ran_without_logging ? "bg-[rgba(244,71,107,0.04)]" : "";
   return (
-    <tr className={`border-b border-[var(--color-border-soft)] hover:bg-white/[0.02] ${!p.has_definition ? "bg-[rgba(244,71,107,0.04)]" : ""}`}>
+    <tr className={`border-b border-[var(--color-border-soft)] hover:bg-white/[0.02] ${rowTint}`}>
       <td className="px-5 py-2.5">
         <div className={`font-mono ${p.has_definition ? "text-white" : "text-[var(--color-rose)]"}`}>{p.pipeline_name}</div>
         {p.output_csv && <div className="text-[10.5px] text-[var(--color-fg-subtle)] font-mono">→ {p.output_csv}</div>}

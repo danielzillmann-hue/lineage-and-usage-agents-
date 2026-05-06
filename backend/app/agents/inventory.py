@@ -112,6 +112,29 @@ async def run(req: RunRequest, results, emit: EmitFn) -> None:
                 inv.tables.append(t)
             await log_event(emit, AgentName.INVENTORY, f"Parsed {len(ddl_files)} DDL files → {sum(1 for t in inv.tables if t.kind in ('TABLE','VIEW'))} objects")
 
+    # ─── 2b. Cross-reference pipeline outputs against actual CSV files ──
+    if req.bucket and inv.pipelines and req.outputs_prefix is not None:
+        try:
+            csvs = gcs.list_csv_outputs(req.bucket, req.outputs_prefix)
+            csv_by_name: dict[str, gcs.ClassifiedFile] = {}
+            for c in csvs:
+                short = c.name.split("/")[-1].lower()
+                csv_by_name.setdefault(short, c)
+            await log_event(
+                emit, AgentName.INVENTORY,
+                f"Outputs scan: {len(csvs)} CSV files at gs://{req.bucket}/{req.outputs_prefix}",
+            )
+            for p in inv.pipelines:
+                if not p.output_csv:
+                    continue
+                hit = csv_by_name.get(p.output_csv.lower())
+                if hit:
+                    p.csv_exists = True
+                    p.csv_last_modified = hit.updated
+                    p.csv_size_bytes = hit.size
+        except Exception as e:  # noqa: BLE001
+            log.warning("output CSV scan failed: %s", e)
+
     # ─── 3. Match audit-log runs against XML-defined pipelines ──────────
     runs = oracle_runs
     matched: set[str] = set()
@@ -363,16 +386,30 @@ def _build_flags(inv: Inventory) -> list[InventoryFlag]:
                 detail=f"{t.fqn} has no PK constraint declared.",
                 object_fqn=t.fqn,
             ))
-    # Pipelines that never ran
+    # Pipelines that never ran (audit log silent AND no output CSV)
     for p in inv.pipelines:
-        if p.runs is None or p.runs.runs_total == 0:
+        no_audit = p.runs is None or p.runs.runs_total == 0
+        if no_audit and p.csv_exists:
+            # Output CSV exists despite no audit-log entries → pipeline ran but
+            # didn't write to ETL_EXECUTION_LOGS. Classic governance gap.
+            flags.append(InventoryFlag(
+                severity="critical",
+                title="Pipeline ran without logging",
+                detail=(
+                    f"{p.name} produced {p.output_csv} (last modified {p.csv_last_modified}) "
+                    f"but has no entries in ETL_EXECUTION_LOGS. The pipeline executes outside "
+                    f"the audit framework — observability and SLA tracking can't see it."
+                ),
+                object_fqn=p.name,
+            ))
+        elif no_audit and not p.csv_exists:
             flags.append(InventoryFlag(
                 severity="warn",
                 title="Pipeline never executed",
-                detail=f"{p.name} is defined in {p.file} but has no execution history.",
+                detail=f"{p.name} is defined in {p.file} but has no execution history and no output CSV in the bucket.",
                 object_fqn=p.name,
             ))
-        elif p.runs.runs_failed > 0 and p.runs.runs_total > 0 and (p.runs.runs_failed / p.runs.runs_total) >= 0.05:
+        elif p.runs and p.runs.runs_failed > 0 and p.runs.runs_total > 0 and (p.runs.runs_failed / p.runs.runs_total) >= 0.05:
             pct = 100 * p.runs.runs_failed / p.runs.runs_total
             flags.append(InventoryFlag(
                 severity="critical" if pct >= 10 else "warn",

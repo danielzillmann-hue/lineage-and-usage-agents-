@@ -95,6 +95,11 @@ class ETLPipeline(BaseModel):
     runs: PipelineRunStats | None = None
     connection_host: str | None = None
     connection_service: str | None = None
+    # Cross-checked from the outputs bucket — proof the pipeline produced data
+    # even when the audit log says it didn't.
+    csv_exists: bool = False
+    csv_last_modified: str | None = None
+    csv_size_bytes: int | None = None
 
 
 class InventoryFlag(BaseModel):
@@ -152,6 +157,8 @@ class PipelineUsage(BaseModel):
     success_rate: float = 0.0
     output_csv: str | None = None
     has_definition: bool = True
+    csv_exists: bool = False
+    ran_without_logging: bool = False  # CSV produced but audit log silent
 
 
 class UsageReport(BaseModel):
