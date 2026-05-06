@@ -1,0 +1,110 @@
+@import "tailwindcss";
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Insignia × Intelia design tokens
+   Primary navy + Insignia mid-blue + vibrant cyan + warm coral.
+   Dark mode default — premium technical feel for the demo.
+─────────────────────────────────────────────────────────────────────────── */
+
+@theme {
+  /* Brand */
+  --color-navy-50:  #eef1f7;
+  --color-navy-100: #d6dcec;
+  --color-navy-200: #aab6d4;
+  --color-navy-300: #7d8fbb;
+  --color-navy-400: #506aa3;
+  --color-navy-500: #285294;
+  --color-navy-600: #1f4179;
+  --color-navy-700: #18335f;
+  --color-navy-800: #102447;
+  --color-navy-900: #0a1830;
+  --color-navy-950: #050d1d;
+
+  --color-cyan-accent: #00b4f0;
+  --color-cyan-soft:   #7ebcf9;
+  --color-coral:       #ff6b47;
+  --color-amber:       #f6b400;
+  --color-emerald:     #18c29c;
+  --color-rose:        #f4476b;
+
+  --color-bg:          #060b1a;
+  --color-bg-elev-1:   #0c1530;
+  --color-bg-elev-2:   #111a3a;
+  --color-bg-elev-3:   #1a2550;
+  --color-border:      #1f2c5a;
+  --color-border-soft: #16204a;
+  --color-fg:          #e7ecf6;
+  --color-fg-muted:    #97a3c2;
+  --color-fg-subtle:   #6471a0;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  --font-mono: var(--font-geist-mono), ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+}
+
+:root {
+  color-scheme: dark;
+  --background: var(--color-bg);
+  --foreground: var(--color-fg);
+}
+
+html, body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 12% -10%, rgba(40, 82, 148, 0.30), transparent 60%),
+    radial-gradient(900px 500px at 100% 110%, rgba(0, 180, 240, 0.10), transparent 55%),
+    var(--color-bg);
+  min-height: 100vh;
+}
+
+/* Subtle grid texture for the hero */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 36px 36px;
+}
+
+.glass {
+  background: linear-gradient(180deg, rgba(20, 30, 70, 0.65) 0%, rgba(10, 20, 48, 0.55) 100%);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--color-border);
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, #fff 0%, #7ebcf9 60%, #00b4f0 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.text-balance { text-wrap: balance; }
+
+::selection { background: rgba(0, 180, 240, 0.35); color: #fff; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-navy-500); }
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 180, 240, 0.45); }
+  50% { box-shadow: 0 0 0 12px rgba(0, 180, 240, 0); }
+}
+.pulse-glow { animation: pulseGlow 2s ease-out infinite; }
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, transparent, rgba(0, 180, 240, 0.18), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
