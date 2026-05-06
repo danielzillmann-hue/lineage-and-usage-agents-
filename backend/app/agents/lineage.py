@@ -95,16 +95,18 @@ async def run(req: RunRequest, results, emit: EmitFn) -> None:
         if fk_count:
             await log_event(emit, AgentName.LINEAGE, f"FK edges from data model: {fk_count}")
 
-    # ─── 3. Legacy DDL view tracer (only if DDL files were the input) ───
+    # ─── 3. View source-SQL tracer ──────────────────────────────────────
     if inv:
         view_count = 0
         for t in inv.tables:
             if t.kind == "VIEW" and t.source_text:
-                v_edges = _edges_from_view(t.fqn, t.source_text)
+                # Pass the view's own schema so unqualified table refs in the SQL
+                # resolve back to it (Oracle implicitly does the same at runtime).
+                v_edges = _edges_from_view(t.fqn, t.source_text, default_schema=t.schema_name)
                 edges.extend(v_edges)
                 view_count += len(v_edges)
         if view_count:
-            await log_event(emit, AgentName.LINEAGE, f"View edges from DDL: {view_count}")
+            await log_event(emit, AgentName.LINEAGE, f"View column edges traced: {view_count}")
 
     # ─── 4. PL/SQL procedures (LLM, only if procs are present) ──────────
     if inv and inv.procedures:
@@ -157,7 +159,7 @@ def _count_by(items, key) -> dict[str, int]:
     return out
 
 
-def _edges_from_view(view_fqn: str, source_sql: str) -> list[LineageEdge]:
+def _edges_from_view(view_fqn: str, source_sql: str, default_schema: str = "UNKNOWN") -> list[LineageEdge]:
     try:
         tree = sqlglot.parse_one(source_sql, dialect="oracle")
     except Exception as e:  # noqa: BLE001
@@ -167,7 +169,7 @@ def _edges_from_view(view_fqn: str, source_sql: str) -> list[LineageEdge]:
     select = tree if isinstance(tree, exp.Select) else tree.find(exp.Select)
     if not select:
         return []
-    sources = {t.alias_or_name.upper(): _table_fqn(t) for t in select.find_all(exp.Table)}
+    sources = {t.alias_or_name.upper(): _table_fqn(t, default_schema) for t in select.find_all(exp.Table)}
     for projection in select.expressions:
         target_col = projection.alias_or_name.upper() if projection.alias_or_name else None
         if not target_col:
@@ -175,7 +177,7 @@ def _edges_from_view(view_fqn: str, source_sql: str) -> list[LineageEdge]:
         for col in projection.find_all(exp.Column):
             src_table = (col.table or "").upper()
             src_col = col.name.upper()
-            src_fqn = sources.get(src_table) or next(iter(sources.values()), "UNKNOWN.UNKNOWN")
+            src_fqn = sources.get(src_table) or next(iter(sources.values()), f"{default_schema.upper()}.UNKNOWN")
             edges.append(LineageEdge(
                 source_fqn=src_fqn, source_column=src_col,
                 target_fqn=view_fqn, target_column=target_col,
@@ -184,8 +186,9 @@ def _edges_from_view(view_fqn: str, source_sql: str) -> list[LineageEdge]:
     return edges
 
 
-def _table_fqn(t: exp.Table) -> str:
-    return f"{(t.db or 'UNKNOWN').upper()}.{t.name.upper()}"
+def _table_fqn(t: exp.Table, default_schema: str = "UNKNOWN") -> str:
+    schema = (t.db or default_schema).upper()
+    return f"{schema}.{t.name.upper()}"
 
 
 async def _edges_from_procedure(proc, emit: EmitFn) -> list[LineageEdge]:

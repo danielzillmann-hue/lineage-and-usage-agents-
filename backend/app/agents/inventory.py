@@ -335,10 +335,15 @@ def _heuristic_layer_from_name(name: str) -> Layer:
         return Layer.INTEGRATION
     if n.startswith(("RPT_", "MART_", "AGG_", "DSH_")):
         return Layer.REPORTING
+    # Curated views — VW_* and V_* — are read-side, downstream of base tables.
+    if n.startswith(("VW_", "V_")):
+        return Layer.REPORTING
     # Live super-fund DB: short business names are source/raw tables.
     if n in {
         "MEMBERS", "ACCOUNTS", "ACCOUNT_TYPES", "ACCOUNT_INVESTMENTS",
         "INVESTMENT_OPTIONS", "TRANSACTIONS", "ETL_EXECUTION_LOGS",
+        "MEMBER_ADDRESSES", "MONTHLY_FEE_SUMMARIES", "TRANSACTION_STATS",
+        "CORE_TAX_LIABILITY", "STG_DAILY_METRICS",
     }:
         return Layer.RAW
     return Layer.UNKNOWN
