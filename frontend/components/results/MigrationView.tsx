@@ -73,12 +73,18 @@ export function MigrationView({ inventory, runId }: { inventory?: Inventory; run
                 Manifest the Transformation Agent ingests. Pipelines and tables flagged decommission-safe are filtered out.
               </CardDescription>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
+              <a href={`${API_BASE}/api/runs/${runId}/handover.html`} target="_blank" rel="noopener noreferrer" style={btnSecondary} title="Print-ready handover document">
+                <Download className="h-3.5 w-3.5" strokeWidth={1.25} /> Handover (HTML)
+              </a>
+              <a href={`${API_BASE}/api/runs/${runId}/handover.md`} download style={btnSecondary}>
+                <Download className="h-3.5 w-3.5" strokeWidth={1.25} /> Handover (Markdown)
+              </a>
               <a href={`${API_BASE}/api/runs/${runId}/scope.json`} download style={btnSecondary}>
-                <Download className="h-3.5 w-3.5" strokeWidth={1.25} /> Export JSON
+                <Download className="h-3.5 w-3.5" strokeWidth={1.25} /> Scope JSON
               </a>
               <a href={`${API_BASE}/api/runs/${runId}/scope.csv`} download style={btnSecondary}>
-                <Download className="h-3.5 w-3.5" strokeWidth={1.25} /> Export CSV
+                <Download className="h-3.5 w-3.5" strokeWidth={1.25} /> Scope CSV
               </a>
             </div>
           </div>

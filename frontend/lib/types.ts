@@ -90,6 +90,16 @@ export interface Column {
   sensitivity: Sensitivity;
   nature: ColumnNature;
   annotation_notes?: string | null;
+  inherited_sensitivity_from?: string[];
+  user_overridden?: boolean;
+}
+
+export interface ColumnAnnotationUpdate {
+  table_fqn: string;
+  column_name: string;
+  sensitivity?: Sensitivity;
+  nature?: ColumnNature;
+  annotation_notes?: string | null;
 }
 
 export interface Table {

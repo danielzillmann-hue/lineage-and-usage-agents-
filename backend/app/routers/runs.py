@@ -1,13 +1,24 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
+from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from fastapi.responses import HTMLResponse
+
 from app.models.run import Run, RunRequest
-from app.models.schema import RunResults
-from app.services import orchestrator, store
+from app.models.schema import ColumnNature, RunResults, Sensitivity
+from app.services import handover, orchestrator, store
 from app.services import migration as mig
 
 router = APIRouter()
+
+
+class ColumnAnnotationUpdate(BaseModel):
+    table_fqn: str            # e.g. SUPERUSER.MEMBERS
+    column_name: str
+    sensitivity: Sensitivity | None = None
+    nature: ColumnNature | None = None
+    annotation_notes: str | None = None
 
 
 @router.post("", response_model=Run)
@@ -39,6 +50,67 @@ async def get_results(run_id: str) -> RunResults:
 @router.get("/{run_id}/stream")
 async def stream_run(run_id: str) -> EventSourceResponse:
     return EventSourceResponse(orchestrator.stream(run_id))
+
+
+@router.patch("/{run_id}/columns")
+async def patch_column_annotation(run_id: str, update: ColumnAnnotationUpdate) -> dict:
+    """Apply a human override to a single column's classification.
+
+    Re-runs sensitivity propagation so PII inherited downstream stays in sync.
+    Returns the updated column payload.
+    """
+    results = await store.get_results(run_id)
+    if not results or not results.inventory:
+        raise HTTPException(status_code=404, detail="results not found")
+    inv = results.inventory
+    target_table = next((t for t in inv.tables if t.fqn.upper() == update.table_fqn.upper()), None)
+    if not target_table:
+        raise HTTPException(status_code=404, detail=f"table {update.table_fqn} not found")
+    target_col = next((c for c in target_table.columns if c.name.upper() == update.column_name.upper()), None)
+    if not target_col:
+        raise HTTPException(status_code=404, detail=f"column {update.column_name} not found")
+
+    if update.sensitivity is not None:
+        target_col.sensitivity = update.sensitivity
+    if update.nature is not None:
+        target_col.nature = update.nature
+    if update.annotation_notes is not None:
+        target_col.annotation_notes = update.annotation_notes[:160] if update.annotation_notes else None
+    target_col.user_overridden = True
+
+    # Reset and re-propagate so downstream PII reach reflects the override.
+    for t in inv.tables:
+        for c in t.columns:
+            c.inherited_sensitivity_from = []
+    from app.services import sensitivity_propagation as _sens
+    _sens.propagate(inv, results.lineage)
+
+    await store.save_results(run_id, results)
+    return target_col.model_dump()
+
+
+@router.get("/{run_id}/handover.html", response_class=HTMLResponse)
+async def handover_html(run_id: str) -> HTMLResponse:
+    run = await store.get_run(run_id)
+    results = await store.get_results(run_id)
+    if not run or not results:
+        raise HTTPException(status_code=404, detail="results not found")
+    return HTMLResponse(content=handover.render_html(run, results))
+
+
+@router.get("/{run_id}/handover.md")
+async def handover_md(run_id: str) -> PlainTextResponse:
+    run = await store.get_run(run_id)
+    results = await store.get_results(run_id)
+    if not run or not results:
+        raise HTTPException(status_code=404, detail="results not found")
+    return PlainTextResponse(
+        content=handover.render_markdown(run, results),
+        headers={
+            "Content-Type": "text/markdown",
+            "Content-Disposition": f'attachment; filename="handover-{run_id[:8]}.md"',
+        },
+    )
 
 
 @router.get("/{run_id}/scope.json")

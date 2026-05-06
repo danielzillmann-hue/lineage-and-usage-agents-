@@ -1,6 +1,6 @@
 import type {
-  BucketPreview, DemoDefaults, OracleConnection, Run, RunRequest, RunResults,
-  StreamEvent, TestConnectionResponse,
+  BucketPreview, Column, ColumnAnnotationUpdate, DemoDefaults, OracleConnection,
+  Run, RunRequest, RunResults, StreamEvent, TestConnectionResponse,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8080";
@@ -29,6 +29,8 @@ export const api = {
   listRuns: () => jfetch<Run[]>("/api/runs"),
   getRun: (id: string) => jfetch<Run>(`/api/runs/${id}`),
   getResults: (id: string) => jfetch<RunResults>(`/api/runs/${id}/results`),
+  patchColumn: (id: string, update: ColumnAnnotationUpdate) =>
+    jfetch<Column>(`/api/runs/${id}/columns`, { method: "PATCH", body: JSON.stringify(update) }),
 
   streamUrl: (id: string) => `${API_BASE}/api/runs/${id}/stream`,
 };

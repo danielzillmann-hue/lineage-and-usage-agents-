@@ -76,12 +76,29 @@ async def _execute(run_id: str, req: RunRequest) -> None:
         await _safe(AgentName.LINEAGE, lambda: lineage_agent.run(req, results, _emit(run_id)))
         results.lineage = lineage_agent.last_result
         # After lineage is built we can compute decommission readiness +
-        # migration sequencing, both of which require the edge set.
+        # migration sequencing + propagate column sensitivity downstream.
         if results.inventory and results.lineage:
             try:
                 from app.services import migration as _mig
+                from app.services import sensitivity_propagation as _sens
                 results.inventory.decommission = _mig.compute_decommission(results.inventory, results.lineage)
                 results.inventory.sequencing = _mig.compute_sequencing(results.inventory, results.lineage)
+                added = _sens.propagate(results.inventory, results.lineage)
+                if added:
+                    summary = _sens.pii_reach_summary(results.inventory)
+                    log.info("PII propagation: %s", summary)
+                    # Add a finding so the executive summary can pick it up.
+                    from app.models.schema import InventoryFlag
+                    results.inventory.flags.append(InventoryFlag(
+                        severity="warn",
+                        title=f"PII reach: {summary['columns_with_inherited_sensitivity']} downstream columns inherit sensitivity",
+                        detail=(
+                            f"{summary['pii_columns_total']} columns are classified as PII; their values flow into "
+                            f"{summary['columns_with_inherited_sensitivity']} downstream columns across "
+                            f"{summary['objects_with_inherited_sensitivity']} objects via lineage. Migration must "
+                            f"preserve sensitivity classifications and masking policies on every inheritor."
+                        ),
+                    ))
             except Exception as e:  # noqa: BLE001
                 log.warning("post-lineage migration signals failed: %s", e)
         await store.save_results(run_id, results)

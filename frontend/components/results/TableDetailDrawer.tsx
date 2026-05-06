@@ -1,27 +1,71 @@
 "use client";
 
-import { useEffect } from "react";
-import { X, Key, Link2, FileText, Database, Activity, GitBranch } from "lucide-react";
+import { useEffect, useState } from "react";
+import { X, Key, Link2, FileText, Database, Activity, GitBranch, Pencil, Shield } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
-import type { ETLPipeline, Table } from "@/lib/types";
+import { api } from "@/lib/api";
+import type { Column, ColumnNature, ETLPipeline, Sensitivity, Table } from "@/lib/types";
 import { formatBytes, formatNumber } from "@/lib/utils";
 
 interface Props {
   table: Table | null;
   onClose: () => void;
   pipelines?: ETLPipeline[];
+  runId?: string;
+  onColumnEdit?: (tableFqn: string, column: Column) => void;
 }
 
-export function TableDetailDrawer({ table, onClose, pipelines = [] }: Props) {
+const SENSITIVITY_OPTIONS: Sensitivity[] = ["pii", "tax", "financial", "internal", "public"];
+const NATURE_OPTIONS: ColumnNature[] = ["key", "audit", "calculated", "reference", "data"];
+
+export function TableDetailDrawer({ table, onClose, pipelines = [], runId, onColumnEdit }: Props) {
+  const [editingCol, setEditingCol] = useState<string | null>(null);
+  const [savingCol, setSavingCol] = useState<string | null>(null);
+  // Local override of column values for optimistic UI
+  const [localOverrides, setLocalOverrides] = useState<Record<string, Partial<Column>>>({});
+
   // Close on ESC
   useEffect(() => {
     if (!table) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (editingCol) setEditingCol(null);
+        else onClose();
+      }
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [table, onClose]);
+  }, [table, onClose, editingCol]);
 
   if (!table) return null;
+
+  const applyEdit = async (col: Column, patch: { sensitivity?: Sensitivity; nature?: ColumnNature }) => {
+    if (!runId) return;
+    const key = col.name;
+    setSavingCol(key);
+    setLocalOverrides((prev) => ({ ...prev, [key]: { ...prev[key], ...patch, user_overridden: true } }));
+    try {
+      const updated = await api.patchColumn(runId, {
+        table_fqn: `${table.schema_name}.${table.name}`,
+        column_name: col.name,
+        sensitivity: patch.sensitivity,
+        nature: patch.nature,
+      });
+      setLocalOverrides((prev) => ({ ...prev, [key]: updated }));
+      onColumnEdit?.(`${table.schema_name}.${table.name}`, updated);
+    } catch (e) {
+      // revert on error
+      setLocalOverrides((prev) => {
+        const { [key]: _drop, ...rest } = prev;
+        return rest;
+      });
+    } finally {
+      setSavingCol(null);
+      setEditingCol(null);
+    }
+  };
+
+  const colWithOverride = (c: Column): Column => ({ ...c, ...(localOverrides[c.name] ?? {}) });
 
   // Pipelines that READ this table (its name appears in source_tables)
   const reading = pipelines.filter((p) =>
@@ -127,18 +171,54 @@ export function TableDetailDrawer({ table, onClose, pipelines = [] }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {table.columns.map((col) => {
+                  {table.columns.map((rawCol) => {
+                    const col = colWithOverride(rawCol);
                     const sens = col.sensitivity ?? "internal";
                     const sensVariant =
                       sens === "pii" ? "crit" :
                       sens === "tax" ? "warn" :
                       sens === "financial" ? "warn" :
                       sens === "public" ? "ok" : "neutral";
+                    const isInherited = (col.inherited_sensitivity_from?.length ?? 0) > 0;
+                    const isEditingThis = editingCol === col.name;
                     return (
-                      <tr key={col.name} className="border-t border-[var(--color-border-soft)] hover:bg-white/[0.02]" title={col.annotation_notes ?? undefined}>
+                      <tr key={col.name} className="border-t border-[var(--color-border-soft)] hover:bg-white/[0.02]">
                         <td className="px-3 py-2 font-mono text-[var(--ink)]">{col.name}</td>
                         <td className="px-3 py-2 text-[11.5px] font-mono text-[var(--color-fg-muted)]">{col.data_type}</td>
-                        <td className="px-3 py-2"><Badge variant={sensVariant}>{sens}</Badge></td>
+                        <td className="px-3 py-2 relative">
+                          <button
+                            onClick={() => setEditingCol(isEditingThis ? null : col.name)}
+                            disabled={!runId}
+                            title={col.annotation_notes ?? "click to edit"}
+                            style={{
+                              background: "transparent", border: 0, padding: 0,
+                              cursor: runId ? "pointer" : "default",
+                              display: "inline-flex", alignItems: "center", gap: 4,
+                            }}
+                          >
+                            <Badge variant={sensVariant}>{sens}</Badge>
+                            {isInherited && !col.user_overridden && (
+                              <span title={`Inherited from: ${col.inherited_sensitivity_from!.join(", ")}`}>
+                                <Shield className="h-2.5 w-2.5" strokeWidth={1.5} style={{ color: "var(--ink-3)" }} />
+                              </span>
+                            )}
+                            {col.user_overridden && (
+                              <span title="Human-overridden">
+                                <Pencil className="h-2.5 w-2.5" strokeWidth={1.5} style={{ color: "var(--brand-emerald)" }} />
+                              </span>
+                            )}
+                          </button>
+                          {isEditingThis && runId && (
+                            <EditPopover
+                              kind="sensitivity"
+                              current={sens}
+                              options={SENSITIVITY_OPTIONS}
+                              saving={savingCol === col.name}
+                              onPick={(v) => applyEdit(rawCol, { sensitivity: v as Sensitivity })}
+                              onClose={() => setEditingCol(null)}
+                            />
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-[11.5px] text-[var(--color-fg-muted)]">{col.nature ?? "data"}</td>
                         <td className="px-2 py-2 text-center text-[11px]">
                           {col.nullable
@@ -194,6 +274,61 @@ function SectionTitle({ icon: Icon, children }: { icon: React.ComponentType<{ cl
       <Icon className="h-3.5 w-3.5 text-[var(--color-cyan-soft)]" />
       <div>{children}</div>
     </div>
+  );
+}
+
+function EditPopover<T extends string>({
+  kind, current, options, saving, onPick, onClose,
+}: {
+  kind: string;
+  current: T;
+  options: T[];
+  saving: boolean;
+  onPick: (v: T) => void;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-[60]"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div
+        className="absolute z-[70] mt-1 left-0"
+        style={{
+          background: "var(--bg-elev)",
+          border: "1px solid var(--line)",
+          borderRadius: 6,
+          boxShadow: "0 4px 14px rgba(15,31,44,0.08)",
+          padding: 4, minWidth: 140,
+        }}
+      >
+        <div className="px-2 py-1 text-[10.5px]" style={{
+          fontFamily: "var(--font-mono)", textTransform: "uppercase",
+          letterSpacing: "0.1em", color: "var(--ink-3)",
+        }}>
+          set {kind}
+        </div>
+        {options.map((o) => (
+          <button
+            key={o}
+            onClick={(e) => { e.stopPropagation(); onPick(o); }}
+            disabled={saving}
+            style={{
+              width: "100%", textAlign: "left",
+              padding: "5px 8px", fontSize: 12.5,
+              background: o === current ? "var(--bg-sunk)" : "transparent",
+              color: o === current ? "var(--ink)" : "var(--ink-2)",
+              border: 0, borderRadius: 4, cursor: saving ? "wait" : "pointer",
+              fontFamily: "var(--font-sans)",
+            }}
+          >
+            {o}{o === current ? "  (current)" : ""}
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 

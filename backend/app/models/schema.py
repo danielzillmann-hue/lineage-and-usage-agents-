@@ -56,6 +56,11 @@ class Column(BaseModel):
     sensitivity: Sensitivity = Sensitivity.INTERNAL
     nature: ColumnNature = ColumnNature.DATA
     annotation_notes: str | None = None  # short LLM rationale
+    # PII propagation: upstream "schema.table.column" entries that flowed
+    # PII (or other sensitive) values into this column via the lineage graph.
+    inherited_sensitivity_from: list[str] = Field(default_factory=list)
+    # Human-edit overrides — set when a user accepts/changes a classification.
+    user_overridden: bool = False
 
 
 class Table(BaseModel):

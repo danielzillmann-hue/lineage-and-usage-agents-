@@ -18,7 +18,7 @@ const LAYER_TINT: Record<Layer, string> = {
   unknown:     "border-[var(--color-border)] bg-[var(--color-bg-elev-2)] text-[var(--color-fg-subtle)]",
 };
 
-export function InventoryView({ inventory }: { inventory: Inventory | undefined }) {
+export function InventoryView({ inventory, runId }: { inventory: Inventory | undefined; runId?: string }) {
   const [q, setQ] = useState("");
   const [layerFilter, setLayerFilter] = useState<Layer | "all">("all");
   const [selected, setSelected] = useState<Table | null>(null);
@@ -108,6 +108,7 @@ export function InventoryView({ inventory }: { inventory: Inventory | undefined 
       table={selected}
       onClose={() => setSelected(null)}
       pipelines={inventory.pipelines}
+      runId={runId}
     />
     </div>
   );

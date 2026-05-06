@@ -85,17 +85,21 @@ export function ResultsView({ runId }: { runId: string }) {
                 <span>{relativeTime(run.created_at)}</span>
               </div>
             </div>
-            <button
+            <a
+              href={`${process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8080"}/api/runs/${runId}/handover.html`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open handover document — File > Save as PDF for a print copy"
               style={{
                 display: "inline-flex", alignItems: "center", gap: 8,
                 fontSize: 14, padding: "8px 14px",
                 background: "var(--bg-elev)", color: "var(--ink)",
                 border: "1px solid var(--line)", borderRadius: "var(--r-md)",
-                cursor: "pointer", fontWeight: 500,
+                cursor: "pointer", fontWeight: 500, textDecoration: "none",
               }}
             >
               <Download className="h-3.5 w-3.5" strokeWidth={1.25} /> Export
-            </button>
+            </a>
           </div>
 
           {/* Tabs strip */}
@@ -131,7 +135,7 @@ export function ResultsView({ runId }: { runId: string }) {
             </TabsContent>
             <TabsContent value="inventory" className="mt-0">
               <div style={{ maxWidth: 1400, margin: "0 auto", padding: "32px 32px 64px" }}>
-                <InventoryView inventory={results.inventory} />
+                <InventoryView inventory={results.inventory} runId={runId} />
               </div>
             </TabsContent>
             <TabsContent value="lineage" className="mt-0">
