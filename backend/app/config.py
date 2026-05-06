@@ -14,7 +14,9 @@ class Settings(BaseSettings):
     results_bucket: str = Field(default="dan-sandpit-lineage-results")
 
     # Vertex AI Gemini — uses ADC, no API key needed.
+    # 2.5 Flash is in australia-southeast1; 2.5 Pro currently isn't, so summary uses us-central1.
     vertex_location: str = Field(default="australia-southeast1")
+    summary_location: str = Field(default="us-central1")
     inventory_model: str = Field(default="gemini-2.5-flash")
     lineage_model: str = Field(default="gemini-2.5-flash")
     usage_model: str = Field(default="gemini-2.5-flash")

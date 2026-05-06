@@ -17,19 +17,31 @@ log = logging.getLogger(__name__)
 EmitFn = Callable[[StreamEvent], Awaitable[None]]
 
 
-def gemini() -> genai.Client:
-    """Vertex AI client. Auth via Application Default Credentials."""
+def gemini(location: str | None = None) -> genai.Client:
+    """Vertex AI client. Auth via Application Default Credentials.
+
+    Pass a non-default location for models that aren't available in the primary
+    region (e.g. Gemini 2.5 Pro often needs us-central1).
+    """
     s = get_settings()
-    return genai.Client(vertexai=True, project=s.gcp_project, location=s.vertex_location)
+    return genai.Client(vertexai=True, project=s.gcp_project, location=location or s.vertex_location)
 
 
 async def log_event(emit: EmitFn, agent: AgentName, message: str, *, kind: str = "log") -> None:
     await emit(StreamEvent(event=kind, agent=agent, message=message))
 
 
-async def stream_thinking(emit: EmitFn, agent: AgentName, model: str, system: str, user: str) -> str:
-    """Run a Gemini completion with streaming, mirror text deltas to the UI as 'thinking' events."""
-    client = gemini()
+async def stream_thinking(
+    emit: EmitFn,
+    agent: AgentName,
+    model: str,
+    system: str,
+    user: str,
+    *,
+    location: str | None = None,
+) -> str:
+    """Run a Gemini completion with streaming; mirror text deltas to the UI as 'thinking'."""
+    client = gemini(location=location)
     parts: list[str] = []
     cfg = types.GenerateContentConfig(
         system_instruction=system,

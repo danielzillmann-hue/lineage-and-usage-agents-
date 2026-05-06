@@ -52,30 +52,37 @@ async def _execute(run_id: str, req: RunRequest) -> None:
     run.status = "running"
     await store.upsert_run(run)
     results = RunResults()
+    any_failed = False
 
-    try:
-        if AgentName.INVENTORY in req.agents:
-            await _run_one(run, AgentName.INVENTORY, lambda: inventory_agent.run(req, results, _emit(run_id)))
-            results.inventory = inventory_agent.last_result
-        if AgentName.LINEAGE in req.agents:
-            await _run_one(run, AgentName.LINEAGE, lambda: lineage_agent.run(req, results, _emit(run_id)))
-            results.lineage = lineage_agent.last_result
-        if AgentName.USAGE in req.agents:
-            await _run_one(run, AgentName.USAGE, lambda: usage_agent.run(req, results, _emit(run_id)))
-            results.usage = usage_agent.last_result
-        if AgentName.SUMMARY in req.agents:
-            await _run_one(run, AgentName.SUMMARY, lambda: summary_agent.run(req, results, _emit(run_id)))
-            results.summary = summary_agent.last_result
+    async def _safe(name: AgentName, work) -> None:
+        nonlocal any_failed
+        try:
+            await _run_one(run, name, work)
+        except Exception as e:  # noqa: BLE001
+            any_failed = True
+            log.exception("agent %s failed", name)
+            await emit(run_id, StreamEvent(event="error", agent=name, message=str(e)))
 
+    if AgentName.INVENTORY in req.agents:
+        await _safe(AgentName.INVENTORY, lambda: inventory_agent.run(req, results, _emit(run_id)))
+        results.inventory = inventory_agent.last_result
         await store.save_results(run_id, results)
-        run.status = "completed"
-    except Exception as e:  # noqa: BLE001
-        log.exception("run %s failed", run_id)
-        run.status = "failed"
-        await emit(run_id, StreamEvent(event="error", message=str(e)))
-    finally:
-        await store.upsert_run(run)
-        await emit(run_id, StreamEvent(event="done"))
+    if AgentName.LINEAGE in req.agents:
+        await _safe(AgentName.LINEAGE, lambda: lineage_agent.run(req, results, _emit(run_id)))
+        results.lineage = lineage_agent.last_result
+        await store.save_results(run_id, results)
+    if AgentName.USAGE in req.agents:
+        await _safe(AgentName.USAGE, lambda: usage_agent.run(req, results, _emit(run_id)))
+        results.usage = usage_agent.last_result
+        await store.save_results(run_id, results)
+    if AgentName.SUMMARY in req.agents:
+        await _safe(AgentName.SUMMARY, lambda: summary_agent.run(req, results, _emit(run_id)))
+        results.summary = summary_agent.last_result
+        await store.save_results(run_id, results)
+
+    run.status = "failed" if any_failed else "completed"
+    await store.upsert_run(run)
+    await emit(run_id, StreamEvent(event="done"))
 
 
 async def _run_one(run: Run, name: AgentName, work) -> None:

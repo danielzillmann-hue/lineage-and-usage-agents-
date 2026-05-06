@@ -48,12 +48,14 @@ async def run(req: RunRequest, results, emit: EmitFn) -> None:
         return
 
     payload = _digest(results)
+    s = get_settings()
     text = await stream_thinking(
         emit,
         AgentName.SUMMARY,
-        get_settings().summary_model,
+        s.summary_model,
         system=_SUMMARY_PROMPT,
         user=json.dumps(payload, indent=2),
+        location=s.summary_location,
     )
 
     try:
