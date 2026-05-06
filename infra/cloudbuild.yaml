@@ -1,0 +1,108 @@
+# Cloud Build pipeline: build + deploy backend, then build + deploy frontend
+# wired to the backend's URL. Run from repo root:
+#
+#   gcloud builds submit \
+#     --config infra/cloudbuild.yaml \
+#     --account=daniel.zillmann@intelia.com.au \
+#     --project=dan-sandpit \
+#     --region=australia-southeast1
+#
+# Substitutions can be overridden with --substitutions=_FOO=bar.
+
+substitutions:
+  _REGION: australia-southeast1
+  _AR_REPO: lineage-agents
+  _BACKEND_SERVICE: lineage-agents-api
+  _FRONTEND_SERVICE: lineage-agents-web
+  _RUN_SA: ""   # leave empty to use default Compute SA
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+
+  # ─── 1. Build backend image ────────────────────────────────────────────
+  - id: backend-build
+    name: gcr.io/cloud-builders/docker
+    dir: backend
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_BACKEND_SERVICE}:latest
+      - .
+
+  - id: backend-push
+    name: gcr.io/cloud-builders/docker
+    waitFor: [backend-build]
+    args: [push, --all-tags, "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_BACKEND_SERVICE}"]
+
+  # ─── 2. Deploy backend, capture URL ────────────────────────────────────
+  - id: backend-deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    waitFor: [backend-push]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud run deploy ${_BACKEND_SERVICE} \
+          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_BACKEND_SERVICE}:$SHORT_SHA \
+          --region=${_REGION} \
+          --platform=managed \
+          --allow-unauthenticated \
+          --min-instances=1 \
+          --max-instances=4 \
+          --cpu=2 --memory=2Gi \
+          --concurrency=20 \
+          --timeout=900 \
+          --set-env-vars="APP_GCP_PROJECT=$PROJECT_ID,APP_GCP_REGION=${_REGION},APP_VERTEX_LOCATION=${_REGION},APP_RESULTS_BUCKET=dan-sandpit-lineage-results,APP_CORS_ORIGINS=[\"*\"]"
+        URL=$(gcloud run services describe ${_BACKEND_SERVICE} --region=${_REGION} --format='value(status.url)')
+        echo "$URL" > /workspace/backend_url.txt
+        echo "Backend deployed at: $URL"
+
+  # ─── 3. Build frontend image with backend URL baked in ────────────────
+  - id: frontend-build
+    name: gcr.io/cloud-builders/docker
+    dir: frontend
+    waitFor: [backend-deploy]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        BACKEND_URL=$(cat /workspace/backend_url.txt)
+        echo "Building frontend with NEXT_PUBLIC_API_BASE=$BACKEND_URL"
+        docker build \
+          --build-arg NEXT_PUBLIC_API_BASE="$BACKEND_URL" \
+          -t ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA \
+          -t ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_FRONTEND_SERVICE}:latest \
+          .
+
+  - id: frontend-push
+    name: gcr.io/cloud-builders/docker
+    waitFor: [frontend-build]
+    args: [push, --all-tags, "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_FRONTEND_SERVICE}"]
+
+  # ─── 4. Deploy frontend ────────────────────────────────────────────────
+  - id: frontend-deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    waitFor: [frontend-push]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud run deploy ${_FRONTEND_SERVICE} \
+          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_FRONTEND_SERVICE}:$SHORT_SHA \
+          --region=${_REGION} \
+          --platform=managed \
+          --allow-unauthenticated \
+          --min-instances=1 \
+          --max-instances=4 \
+          --cpu=1 --memory=512Mi \
+          --concurrency=80
+        URL=$(gcloud run services describe ${_FRONTEND_SERVICE} --region=${_REGION} --format='value(status.url)')
+        echo "Frontend deployed at: $URL"
