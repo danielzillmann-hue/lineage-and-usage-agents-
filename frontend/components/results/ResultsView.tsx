@@ -140,7 +140,7 @@ export function ResultsView({ runId }: { runId: string }) {
             </TabsContent>
             <TabsContent value="lineage" className="mt-0">
               <div style={{ marginTop: 0 }}>
-                <LineageView lineage={results.lineage} inventory={results.inventory} />
+                <LineageView lineage={results.lineage} inventory={results.inventory} runId={runId} />
               </div>
             </TabsContent>
             <TabsContent value="usage" className="mt-0">

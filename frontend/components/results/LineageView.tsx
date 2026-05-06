@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Search, Maximize2 } from "lucide-react";
-import type { Inventory, Layer, LineageGraph } from "@/lib/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Search, Maximize2, Minimize2, Image as ImageIcon, FileSpreadsheet, X, Filter } from "lucide-react";
+import type { Inventory, Layer, LineageEdge, LineageGraph, Sensitivity } from "@/lib/types";
 
 const LAYER_COLORS: Record<Layer, { fill: string; stroke: string; text: string; dot: string }> = {
   raw:         { fill: "var(--bg-elev)",       stroke: "var(--ink-3)",          text: "var(--ink-2)",          dot: "var(--ink-3)" },
@@ -19,12 +19,31 @@ const COL_LABELS: Record<Layer, string> = {
   output: "OUTPUTS", unknown: "UNKNOWN",
 };
 
-export function LineageView({ lineage, inventory }: { lineage?: LineageGraph; inventory?: Inventory }) {
+export function LineageView({
+  lineage, inventory, runId,
+}: {
+  lineage?: LineageGraph;
+  inventory?: Inventory;
+  runId?: string;
+}) {
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [layers, setLayers] = useState<Record<Layer, boolean>>({
     raw: true, staging: true, integration: true, reporting: true, output: true, unknown: true,
   });
+  const [pipelineFilter, setPipelineFilter] = useState<string | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  // ESC exits fullscreen
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen]);
 
   const inferLayer = useMemo(() => {
     const m = new Map<string, Layer>();
@@ -37,6 +56,62 @@ export function LineageView({ lineage, inventory }: { lineage?: LineageGraph; in
       return "unknown";
     };
   }, [inventory]);
+
+  // Column-level sensitivity lookup for CSV export and PII path detection
+  const sensByCol = useMemo(() => {
+    const m = new Map<string, Sensitivity>();
+    for (const t of inventory?.tables ?? []) {
+      const fqn = `${t.schema_name}.${t.name}`;
+      for (const c of t.columns) {
+        m.set(`${fqn}.${c.name}`.toUpperCase(), c.sensitivity);
+        m.set(`SOURCE.${t.name}.${c.name}`.toUpperCase(), c.sensitivity);
+        m.set(`OUTPUTS.${t.name}.${c.name}`.toUpperCase(), c.sensitivity);
+      }
+    }
+    return m;
+  }, [inventory]);
+
+  const pipelineNames = useMemo(() => {
+    return [...new Set(inventory?.pipelines.map((p) => p.name) ?? [])].sort();
+  }, [inventory]);
+
+  // Set of FQNs visible when a pipeline filter is active
+  const pipelineFilterSet = useMemo(() => {
+    if (!pipelineFilter || !inventory || !lineage) return null;
+    const p = inventory.pipelines.find((pp) => pp.name === pipelineFilter);
+    if (!p) return null;
+    const set = new Set<string>();
+    set.add(`PIPELINE.${pipelineFilter}`);
+    // Source tables (SOURCE.<NAME>) the pipeline reads
+    for (const src of p.source_tables) {
+      set.add(`SOURCE.${src.toUpperCase()}`);
+      // Some edges reference real schema names — accept those too
+      const match = inventory.tables.find((t) => t.name.toUpperCase() === src.toUpperCase());
+      if (match) set.add(`${match.schema_name}.${match.name}`);
+    }
+    // Output CSV
+    if (p.output_csv) {
+      const short = p.output_csv.replace(/\.csv$/i, "").toUpperCase();
+      set.add(`OUTPUTS.${short}`);
+    }
+    // Walk the lineage to pull in step nodes belonging to this pipeline
+    for (const e of lineage.edges) {
+      const collapse = (fqn: string): string => {
+        if (fqn.startsWith("PIPELINE.")) {
+          const parts = fqn.split(".");
+          return parts.length >= 2 ? `${parts[0]}.${parts[1]}` : fqn;
+        }
+        return fqn;
+      };
+      const cs = collapse(e.source_fqn);
+      const ct = collapse(e.target_fqn);
+      if (cs === `PIPELINE.${pipelineFilter}` || ct === `PIPELINE.${pipelineFilter}`) {
+        set.add(cs);
+        set.add(ct);
+      }
+    }
+    return set;
+  }, [pipelineFilter, inventory, lineage]);
 
   // Build node set (excluding intra-pipeline step nodes — we collapse those to keep the graph readable)
   const { nodes, edges } = useMemo(() => {
@@ -56,6 +131,10 @@ export function LineageView({ lineage, inventory }: { lineage?: LineageGraph; in
       const s = collapse(e.source_fqn);
       const t = collapse(e.target_fqn);
       if (s === t) continue;
+      // Pipeline-isolation filter: drop edges that don't touch the focused pipeline
+      if (pipelineFilterSet) {
+        if (!pipelineFilterSet.has(s) && !pipelineFilterSet.has(t)) continue;
+      }
       nodeSet.add(s);
       nodeSet.add(t);
       const key = `${s}→${t}`;
@@ -65,7 +144,7 @@ export function LineageView({ lineage, inventory }: { lineage?: LineageGraph; in
       nodes: [...nodeSet],
       edges: [...edgeSet.values()],
     };
-  }, [lineage]);
+  }, [lineage, pipelineFilterSet]);
 
   // Group nodes by column (layer) and assign positions
   const layout = useMemo(() => {
@@ -152,15 +231,20 @@ export function LineageView({ lineage, inventory }: { lineage?: LineageGraph; in
     );
   }
 
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "320px 1fr 340px",
-        minHeight: 720,
+  // When fullscreen the whole grid pops out of normal flow into a fixed overlay.
+  const containerStyle: React.CSSProperties = fullscreen
+    ? {
+        position: "fixed", inset: 0, zIndex: 80,
+        display: "grid", gridTemplateColumns: "320px 1fr 340px",
         background: "var(--bg)",
-      }}
-    >
+      }
+    : {
+        display: "grid", gridTemplateColumns: "320px 1fr 340px",
+        minHeight: 720, background: "var(--bg)",
+      };
+
+  return (
+    <div style={containerStyle}>
       {/* ─── Side rail ────────────────────────────────────────── */}
       <aside
         style={{
@@ -193,7 +277,45 @@ export function LineageView({ lineage, inventory }: { lineage?: LineageGraph; in
           </div>
         </div>
 
-        <div className="eyebrow" style={{ marginTop: 8 }}>Layers</div>
+        {pipelineNames.length > 0 && (
+          <>
+            <div className="eyebrow" style={{ marginTop: 8 }}>Focus pipeline</div>
+            <div style={{ marginTop: 12 }}>
+              <select
+                value={pipelineFilter ?? ""}
+                onChange={(e) => setPipelineFilter(e.target.value || null)}
+                className="mono"
+                style={{
+                  width: "100%", height: 32, padding: "0 8px",
+                  fontSize: 12, color: "var(--ink)",
+                  background: "var(--bg)", border: "1px solid var(--line)",
+                  borderRadius: 6, outline: "none",
+                }}
+              >
+                <option value="">— show all —</option>
+                {pipelineNames.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+              {pipelineFilter && (
+                <button
+                  onClick={() => setPipelineFilter(null)}
+                  style={{
+                    marginTop: 6, fontSize: 11,
+                    background: "transparent", border: 0,
+                    color: "var(--brand-emerald-700)", cursor: "pointer",
+                    fontFamily: "var(--font-sans)", padding: 0,
+                    display: "inline-flex", alignItems: "center", gap: 4,
+                  }}
+                >
+                  <X className="h-3 w-3" strokeWidth={1.5} /> clear focus
+                </button>
+              )}
+            </div>
+          </>
+        )}
+
+        <div className="eyebrow" style={{ marginTop: 28 }}>Layers</div>
         <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
           {(["raw", "staging", "integration", "reporting", "unknown"] as Layer[]).map((id) => (
             <label
@@ -259,16 +381,18 @@ export function LineageView({ lineage, inventory }: { lineage?: LineageGraph; in
           </span>
         </div>
         <div style={{ position: "absolute", top: 28, right: 28, display: "flex", gap: 8, zIndex: 2 }}>
-          <button
-            onClick={() => setSelected(null)}
-            style={{
-              display: "inline-flex", alignItems: "center", gap: 6,
-              fontSize: 13, padding: "8px 12px",
-              background: "var(--bg-elev)", color: "var(--ink)",
-              border: "1px solid var(--line)", borderRadius: 6, cursor: "pointer",
-            }}
-          >
-            <Maximize2 className="h-3 w-3" strokeWidth={1.25} /> Reset
+          <button onClick={() => exportCsv(lineage, inferLayer, sensByCol, runId, pipelineFilter)} style={toolbarBtn} title="Export edges as CSV">
+            <FileSpreadsheet className="h-3 w-3" strokeWidth={1.25} /> CSV
+          </button>
+          <button onClick={() => exportPng(svgRef.current, runId, pipelineFilter)} style={toolbarBtn} title="Export graph as PNG">
+            <ImageIcon className="h-3 w-3" strokeWidth={1.25} /> PNG
+          </button>
+          <button onClick={() => setSelected(null)} style={toolbarBtn} title="Clear selection">
+            Reset
+          </button>
+          <button onClick={() => setFullscreen((v) => !v)} style={toolbarBtn} title={fullscreen ? "Exit fullscreen (Esc)" : "Fullscreen"}>
+            {fullscreen ? <Minimize2 className="h-3 w-3" strokeWidth={1.25} /> : <Maximize2 className="h-3 w-3" strokeWidth={1.25} />}
+            {fullscreen ? " Exit" : " Fullscreen"}
           </button>
         </div>
         <div
@@ -282,6 +406,7 @@ export function LineageView({ lineage, inventory }: { lineage?: LineageGraph; in
           }}
         >
           <GraphSVG
+            svgRef={svgRef}
             W={layout.W}
             H={layout.H}
             nodes={nodes}
@@ -369,6 +494,133 @@ export function LineageView({ lineage, inventory }: { lineage?: LineageGraph; in
   );
 }
 
+// ─── Toolbar / export helpers ───────────────────────────────────────────────
+
+const toolbarBtn: React.CSSProperties = {
+  display: "inline-flex", alignItems: "center", gap: 6,
+  fontSize: 12.5, padding: "6px 10px",
+  background: "var(--bg-elev)", color: "var(--ink)",
+  border: "1px solid var(--line)", borderRadius: 6, cursor: "pointer",
+  fontFamily: "var(--font-sans)",
+};
+
+function safeFilename(runId: string | undefined, pipelineFilter: string | null, ext: string): string {
+  const id = (runId ?? "").slice(0, 8) || "lineage";
+  const filter = pipelineFilter ? `-${pipelineFilter.replace(/[^A-Za-z0-9_-]/g, "_")}` : "";
+  return `lineage-${id}${filter}.${ext}`;
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function csvEscape(v: string | number | null | undefined): string {
+  if (v === null || v === undefined) return "";
+  const s = String(v);
+  if (s.includes(",") || s.includes("\n") || s.includes('"')) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function exportCsv(
+  lineage: LineageGraph,
+  inferLayer: (fqn: string) => Layer,
+  sensByCol: Map<string, Sensitivity>,
+  runId: string | undefined,
+  pipelineFilter: string | null,
+) {
+  const headers = [
+    "source_object", "source_column", "source_layer", "source_sensitivity",
+    "target_object", "target_column", "target_layer", "target_sensitivity",
+    "operation", "transform_notes", "pipeline", "confidence", "is_pii_path",
+  ];
+  const lines: string[] = [headers.join(",")];
+
+  // If a pipeline filter is active, restrict to edges produced by that pipeline OR
+  // edges where source/target nodes belong to the same pipeline.
+  const matchesFilter = (e: LineageEdge): boolean => {
+    if (!pipelineFilter) return true;
+    if ((e.origin_object ?? "").toUpperCase() === pipelineFilter.toUpperCase()) return true;
+    if (e.source_fqn.startsWith(`PIPELINE.${pipelineFilter}`)) return true;
+    if (e.target_fqn.startsWith(`PIPELINE.${pipelineFilter}`)) return true;
+    return false;
+  };
+
+  for (const e of lineage.edges) {
+    if (!matchesFilter(e)) continue;
+    const srcLayer = inferLayer(e.source_fqn);
+    const tgtLayer = inferLayer(e.target_fqn);
+    const srcSens = sensByCol.get(`${e.source_fqn}.${e.source_column ?? ""}`.toUpperCase()) ?? "";
+    const tgtSens = sensByCol.get(`${e.target_fqn}.${e.target_column ?? ""}`.toUpperCase()) ?? "";
+    const isPii = srcSens === "pii" || tgtSens === "pii";
+    lines.push([
+      csvEscape(e.source_fqn),
+      csvEscape(e.source_column),
+      csvEscape(srcLayer),
+      csvEscape(srcSens),
+      csvEscape(e.target_fqn),
+      csvEscape(e.target_column),
+      csvEscape(tgtLayer),
+      csvEscape(tgtSens),
+      csvEscape(e.operation),
+      csvEscape(e.transform),
+      csvEscape(e.origin_object),
+      csvEscape(e.confidence),
+      csvEscape(isPii ? "true" : "false"),
+    ].join(","));
+  }
+  const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
+  downloadBlob(blob, safeFilename(runId, pipelineFilter, "csv"));
+}
+
+function exportPng(svg: SVGSVGElement | null, runId: string | undefined, pipelineFilter: string | null) {
+  if (!svg) return;
+  const cloned = svg.cloneNode(true) as SVGSVGElement;
+  // Inline a white background so the PNG isn't transparent
+  const bgRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  const vb = svg.viewBox.baseVal;
+  bgRect.setAttribute("x", String(vb.x));
+  bgRect.setAttribute("y", String(vb.y));
+  bgRect.setAttribute("width", String(vb.width || svg.clientWidth));
+  bgRect.setAttribute("height", String(vb.height || svg.clientHeight));
+  bgRect.setAttribute("fill", "#FFFFFF");
+  cloned.insertBefore(bgRect, cloned.firstChild);
+
+  const xml = new XMLSerializer().serializeToString(cloned);
+  const svgBlob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(svgBlob);
+
+  const img = new Image();
+  img.onload = () => {
+    const scale = 2; // 2x for high DPI
+    const w = (vb.width || svg.clientWidth) * scale;
+    const h = (vb.height || svg.clientHeight) * scale;
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    canvas.toBlob((blob) => {
+      if (blob) downloadBlob(blob, safeFilename(runId, pipelineFilter, "png"));
+      URL.revokeObjectURL(url);
+    }, "image/png");
+  };
+  img.onerror = () => URL.revokeObjectURL(url);
+  img.src = url;
+}
+
+
 function StatRow({ k, v }: { k: string; v: number | string }) {
   return (
     <div
@@ -392,6 +644,7 @@ function normalizeLayer(l: Layer): Layer {
 // ─── SVG renderer ────────────────────────────────────────────────────────────
 
 interface GraphSVGProps {
+  svgRef?: React.MutableRefObject<SVGSVGElement | null>;
   W: number;
   H: number;
   nodes: string[];
@@ -408,10 +661,15 @@ interface GraphSVGProps {
 }
 
 function GraphSVG({
-  W, H, nodes, edges, pos, colXs, colLabels, inferLayer, selected, focusSet, matches, layerOk, onSelect,
+  svgRef, W, H, nodes, edges, pos, colXs, colLabels, inferLayer, selected, focusSet, matches, layerOk, onSelect,
 }: GraphSVGProps) {
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "100%", display: "block" }}>
+    <svg
+      ref={svgRef}
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ width: "100%", height: "100%", display: "block" }}
+    >
       <defs>
         <pattern id="dotgrid" width="24" height="24" patternUnits="userSpaceOnUse">
           <circle cx="1" cy="1" r="0.6" fill="var(--line-strong)" opacity="0.5" />
