@@ -55,26 +55,38 @@ async def run(req: RunRequest, results, emit: EmitFn) -> None:
     procedures = _parse_procedures(proc_files)
     _enrich_from_dictionary(tables, dict_files)
 
+    # Deterministic prefix-based pre-classification — Gemini may refine, but we
+    # always have a meaningful layer/domain even if the LLM is slow or returns junk.
+    for t in tables:
+        t.layer = _heuristic_layer(t)
+        t.domain = _heuristic_domain(t)
+
     await log_event(
         emit,
         AgentName.INVENTORY,
-        f"Parsed {len(tables)} tables/views and {len(procedures)} procedures — classifying with Claude",
+        f"Parsed {len(tables)} tables/views and {len(procedures)} procedures — refining classification with Gemini",
     )
 
     classifications = await _classify_layers_and_domains(tables, emit)
     by_fqn = {t.fqn: t for t in tables}
+    applied = 0
     for row in classifications:
-        t = by_fqn.get(row.get("fqn", ""))
+        t = by_fqn.get(str(row.get("fqn", "")).upper())
         if not t:
             continue
         try:
-            t.layer = Layer(row.get("layer", "unknown"))
-        except ValueError:
-            t.layer = Layer.UNKNOWN
+            t.layer = Layer(row.get("layer", t.layer.value))
+            applied += 1
+        except (ValueError, AttributeError):
+            pass
         try:
-            t.domain = Domain(row.get("domain", "other"))
-        except ValueError:
-            t.domain = Domain.OTHER
+            t.domain = Domain(row.get("domain", t.domain.value))
+        except (ValueError, AttributeError):
+            pass
+    await log_event(
+        emit, AgentName.INVENTORY,
+        f"Layer/domain classification: Gemini refined {applied} of {len(tables)} (rest from heuristic)"
+    )
 
     flags = _heuristic_flags(tables)
 
@@ -225,6 +237,68 @@ def _enrich_from_dictionary(tables: list[Table], files: list[tuple[str, str]]) -
     """
     # Placeholder — implementation arrives with extract sample.
     return
+
+
+_LAYER_RULES: list[tuple[str, Layer]] = [
+    # (token in schema or table name, layer) — first match wins
+    ("WH_RAW.", Layer.RAW),
+    ("WH_STG.", Layer.STAGING),
+    ("WH_DW.", Layer.INTEGRATION),
+    ("WH_RPT.", Layer.REPORTING),
+    ("WH_LEGACY.", Layer.UNKNOWN),
+    ("RAW_", Layer.RAW),
+    ("STG_", Layer.STAGING),
+    ("STAGE_", Layer.STAGING),
+    ("DIM_", Layer.INTEGRATION),
+    ("FACT_", Layer.INTEGRATION),
+    ("F_", Layer.INTEGRATION),
+    ("D_", Layer.INTEGRATION),
+    ("BRIDGE_", Layer.INTEGRATION),
+    ("INT_", Layer.INTEGRATION),
+    ("RPT_", Layer.REPORTING),
+    ("MART_", Layer.REPORTING),
+    ("AGG_", Layer.REPORTING),
+    ("DSH_", Layer.REPORTING),
+    ("V_", Layer.UNKNOWN),  # views — schema prefix usually wins above
+    ("LEG_", Layer.UNKNOWN),
+]
+
+_DOMAIN_HINTS: list[tuple[str, Domain]] = [
+    ("MEMBER", Domain.MEMBER),
+    ("CLIENT", Domain.MEMBER),
+    ("CUSTOMER", Domain.MEMBER),
+    ("INVESTOR", Domain.MEMBER),
+    ("ACCOUNT", Domain.ACCOUNT),
+    ("HOLDING", Domain.HOLDING),
+    ("FUND", Domain.HOLDING),
+    ("PORTFOLIO", Domain.HOLDING),
+    ("TRANSACTION", Domain.TRANSACTION),
+    ("TXN", Domain.TRANSACTION),
+    ("FEE", Domain.FEE),
+    ("ADVISER", Domain.ADVISER),
+    ("ADVISOR", Domain.ADVISER),
+    ("PRODUCT", Domain.PRODUCT),
+    ("DATE", Domain.REFERENCE),
+    ("REF_", Domain.REFERENCE),
+    ("AUDIT", Domain.AUDIT),
+]
+
+
+def _heuristic_layer(t: Table) -> Layer:
+    fqn_upper = t.fqn.upper()
+    name_upper = t.name.upper()
+    for token, layer in _LAYER_RULES:
+        if token in fqn_upper or name_upper.startswith(token):
+            return layer
+    return Layer.UNKNOWN
+
+
+def _heuristic_domain(t: Table) -> Domain:
+    name_upper = t.name.upper()
+    for token, dom in _DOMAIN_HINTS:
+        if token in name_upper:
+            return dom
+    return Domain.OTHER
 
 
 def _heuristic_flags(tables: list[Table]) -> list[InventoryFlag]:
