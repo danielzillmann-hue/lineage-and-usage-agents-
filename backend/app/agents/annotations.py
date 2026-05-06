@@ -144,17 +144,45 @@ async def annotate_columns(inv: Inventory, emit: EmitFn) -> None:
 
 
 def _parse_json_array(text: str) -> list[dict[str, Any]]:
+    return _parse_array_tolerant(text, log_label="annotations")
+
+
+def _parse_array_tolerant(text: str, log_label: str) -> list[dict[str, Any]]:
+    """Parse a JSON array; if truncated (common when Gemini hits the token cap),
+    recover by trimming to the last complete object."""
     s = text.strip()
     if s.startswith("```"):
         s = s.strip("`").lstrip("json").strip()
+    # Fast path
     try:
         parsed: Any = json.loads(s)
+        if isinstance(parsed, dict):
+            for k in ("items", "results", "annotations", "rules", "data"):
+                if isinstance(parsed.get(k), list):
+                    return parsed[k]
+            return []
+        return parsed if isinstance(parsed, list) else []
     except Exception:  # noqa: BLE001
-        log.warning("annotations parse failed; first 200=%r", text[:200])
+        pass
+    # Recover from truncation: find the last `},` and close the array there.
+    if "[" not in s:
+        log.warning("%s parse failed and no '[' found; first 200=%r", log_label, text[:200])
         return []
-    if isinstance(parsed, dict):
-        for k in ("items", "results", "annotations", "data"):
-            if isinstance(parsed.get(k), list):
-                return parsed[k]
+    start = s.index("[")
+    body = s[start:]
+    # Strip any trailing partial object after the last fully-closed `}`
+    last_close = body.rfind("}")
+    if last_close == -1:
+        log.warning("%s parse failed; no closed object; first 200=%r", log_label, text[:200])
         return []
-    return parsed if isinstance(parsed, list) else []
+    repaired = body[: last_close + 1] + "]"
+    # Drop a trailing comma before the inserted `]` if any
+    repaired = repaired.replace("},\n]", "}\n]").replace("}, ]", "}]")
+    try:
+        out = json.loads(repaired)
+        if isinstance(out, list):
+            log.warning("%s parse recovered after truncation: %d objects", log_label, len(out))
+            return out
+    except Exception as e:  # noqa: BLE001
+        log.warning("%s parse recovery failed: %s; first 200=%r last 200=%r", log_label, e, text[:200], text[-200:])
+    return []

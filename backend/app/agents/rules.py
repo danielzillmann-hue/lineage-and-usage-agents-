@@ -98,17 +98,6 @@ def _collect_inputs(inv: Inventory) -> list[dict[str, Any]]:
 
 
 def _parse_json_array(text: str) -> list[dict[str, Any]]:
-    s = text.strip()
-    if s.startswith("```"):
-        s = s.strip("`").lstrip("json").strip()
-    try:
-        parsed: Any = json.loads(s)
-    except Exception:  # noqa: BLE001
-        log.warning("rules parse failed; first 200=%r", text[:200])
-        return []
-    if isinstance(parsed, dict):
-        for k in ("items", "results", "rules", "data"):
-            if isinstance(parsed.get(k), list):
-                return parsed[k]
-        return []
-    return parsed if isinstance(parsed, list) else []
+    # Reuse the tolerant parser from annotations
+    from app.agents.annotations import _parse_array_tolerant
+    return _parse_array_tolerant(text, log_label="rules")

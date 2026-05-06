@@ -50,7 +50,7 @@ async def stream_thinking(
     parts: list[str] = []
     cfg = types.GenerateContentConfig(
         system_instruction=system,
-        max_output_tokens=8192,
+        max_output_tokens=32768,
         temperature=0.2 if json_mode else 0.3,
         response_mime_type="application/json" if json_mode else None,
     )
