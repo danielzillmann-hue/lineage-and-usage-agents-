@@ -1,12 +1,55 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from "recharts";
-import { Activity, AlertTriangle, FileText, ArrowRight, AlertCircle, CheckCircle2, PlayCircle, PauseCircle } from "lucide-react";
+import { Activity, AlertTriangle, FileText, ArrowRight, AlertCircle, CheckCircle2, PauseCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import type { Inventory, PipelineUsage, UsageReport } from "@/lib/types";
 import { formatNumber } from "@/lib/utils";
+
+// ─── Filter pill (toggleable) ────────────────────────────────────────────────
+
+const PILL_TONES = {
+  ok:      { fg: "var(--brand-emerald-700)", bg: "var(--brand-emerald-100)", border: "rgba(15,179,122,0.35)" },
+  warn:    { fg: "var(--warn)",               bg: "var(--warn-bg)",          border: "rgba(199,123,10,0.35)" },
+  crit:    { fg: "var(--crit)",               bg: "var(--crit-bg)",          border: "rgba(192,54,44,0.35)" },
+} as const;
+
+function FilterPill({
+  label, icon, tone, active, disabled, onClick,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  tone: keyof typeof PILL_TONES;
+  active: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  const t = PILL_TONES[tone];
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      type="button"
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 6,
+        fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 500,
+        letterSpacing: "0.02em",
+        padding: "4px 10px", borderRadius: 99,
+        background: active ? t.fg : t.bg,
+        color: active ? "#FFFFFF" : t.fg,
+        border: `1px solid ${active ? t.fg : t.border}`,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.4 : 1,
+        transition: "background .12s, color .12s, border-color .12s",
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
 
 export function UsageView({ usage, inventory }: { usage?: UsageReport; inventory?: Inventory }) {
   const objectsByFqn = useMemo(() => {
@@ -124,16 +167,39 @@ export function UsageView({ usage, inventory }: { usage?: UsageReport; inventory
   );
 }
 
+type StatusKey = "healthy" | "failing" | "off-grid" | "never-run" | "undocumented";
+
+function statusOf(p: PipelineUsage): StatusKey {
+  if (!p.has_definition) return "undocumented";
+  if (p.ran_without_logging) return "off-grid";
+  if (p.runs_total === 0) return "never-run";
+  if (p.runs_failed > 0) return "failing";
+  return "healthy";
+}
+
 function PipelineHealthPanel({ usage }: { usage: UsageReport }) {
+  const [activeFilters, setActiveFilters] = useState<Set<StatusKey>>(new Set());
+  const toggleFilter = (k: StatusKey) =>
+    setActiveFilters((s) => {
+      const next = new Set(s);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+
   const sorted = useMemo(
     () => [...usage.pipelines].sort((a, b) => b.runs_total - a.runs_total),
     [usage.pipelines],
   );
   const total = sorted.length;
-  const neverRun = usage.never_run_pipelines.length;
-  const undocumented = usage.runs_without_definition.length;
-  const failing = sorted.filter((p) => p.runs_total > 0 && p.runs_failed > 0).length;
-  const offGrid = sorted.filter((p) => p.ran_without_logging).length;
+  const neverRun = sorted.filter((p) => statusOf(p) === "never-run").length;
+  const undocumented = sorted.filter((p) => statusOf(p) === "undocumented").length;
+  const failing = sorted.filter((p) => statusOf(p) === "failing").length;
+  const offGrid = sorted.filter((p) => statusOf(p) === "off-grid").length;
+  const healthy = sorted.filter((p) => statusOf(p) === "healthy").length;
+
+  const visible = activeFilters.size === 0
+    ? sorted
+    : sorted.filter((p) => activeFilters.has(statusOf(p)));
 
   return (
     <Card>
@@ -143,12 +209,49 @@ function PipelineHealthPanel({ usage }: { usage: UsageReport }) {
             <CardTitle>Pipeline health</CardTitle>
             <CardDescription>From <span className="font-mono">ETL_EXECUTION_LOGS</span> on the live database.</CardDescription>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Badge variant="info"><PlayCircle className="h-3 w-3" /> {total} tracked</Badge>
-            {failing > 0 && <Badge variant="warn"><AlertTriangle className="h-3 w-3" /> {failing} failing</Badge>}
-            {offGrid > 0 && <Badge variant="crit"><AlertCircle className="h-3 w-3" /> {offGrid} running off-grid</Badge>}
-            {neverRun > 0 && <Badge variant="warn"><PauseCircle className="h-3 w-3" /> {neverRun} never run</Badge>}
-            {undocumented > 0 && <Badge variant="crit"><AlertCircle className="h-3 w-3" /> {undocumented} undocumented</Badge>}
+          <div className="flex flex-wrap gap-2 items-center">
+            <FilterPill
+              label={`${healthy} healthy`} icon={<CheckCircle2 className="h-3 w-3" strokeWidth={1.5} />}
+              tone="ok" active={activeFilters.has("healthy")} disabled={healthy === 0}
+              onClick={() => toggleFilter("healthy")}
+            />
+            <FilterPill
+              label={`${failing} failing`} icon={<AlertTriangle className="h-3 w-3" strokeWidth={1.5} />}
+              tone="warn" active={activeFilters.has("failing")} disabled={failing === 0}
+              onClick={() => toggleFilter("failing")}
+            />
+            <FilterPill
+              label={`${offGrid} off-grid`} icon={<AlertCircle className="h-3 w-3" strokeWidth={1.5} />}
+              tone="crit" active={activeFilters.has("off-grid")} disabled={offGrid === 0}
+              onClick={() => toggleFilter("off-grid")}
+            />
+            <FilterPill
+              label={`${neverRun} never run`} icon={<PauseCircle className="h-3 w-3" strokeWidth={1.5} />}
+              tone="warn" active={activeFilters.has("never-run")} disabled={neverRun === 0}
+              onClick={() => toggleFilter("never-run")}
+            />
+            <FilterPill
+              label={`${undocumented} undocumented`} icon={<AlertCircle className="h-3 w-3" strokeWidth={1.5} />}
+              tone="crit" active={activeFilters.has("undocumented")} disabled={undocumented === 0}
+              onClick={() => toggleFilter("undocumented")}
+            />
+            {activeFilters.size > 0 && (
+              <button
+                onClick={() => setActiveFilters(new Set())}
+                style={{
+                  fontSize: 11, padding: "3px 8px", marginLeft: 4,
+                  background: "transparent", color: "var(--ink-3)",
+                  border: "1px solid var(--line)", borderRadius: 99, cursor: "pointer",
+                  fontFamily: "var(--font-sans)",
+                }}
+                title="Clear all filters"
+              >
+                clear · {visible.length} of {total}
+              </button>
+            )}
+            <span className="ml-auto" style={{ fontSize: 11, color: "var(--ink-4)" }}>
+              {activeFilters.size === 0 ? `${total} tracked` : `${visible.length} shown`}
+            </span>
           </div>
         </div>
       </CardHeader>
@@ -167,7 +270,14 @@ function PipelineHealthPanel({ usage }: { usage: UsageReport }) {
               </tr>
             </thead>
             <tbody>
-              {sorted.map((p) => <PipelineRow key={p.pipeline_name + p.has_definition} p={p} />)}
+              {visible.map((p) => <PipelineRow key={p.pipeline_name + p.has_definition} p={p} />)}
+              {visible.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-5 py-12 text-center" style={{ color: "var(--ink-3)" }}>
+                    No pipelines match the active filters.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
