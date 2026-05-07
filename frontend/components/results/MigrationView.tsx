@@ -150,14 +150,15 @@ export function MigrationView({ inventory, runId }: { inventory?: Inventory; run
             <CardDescription>Order of conversion based on lineage dependency depth. Migrate Wave 1 first; each later wave assumes earlier ones are live.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${Math.min(sequencing.length, 4)}, minmax(0, 1fr))` }}>
-              {sequencing.slice(0, 4).map((w) => <WaveCard key={w.wave} wave={w} />)}
+            <div
+              className="grid gap-4"
+              style={{
+                gridTemplateColumns: `repeat(auto-fit, minmax(260px, 1fr))`,
+                alignItems: "stretch",
+              }}
+            >
+              {sequencing.map((w) => <WaveCard key={w.wave} wave={w} />)}
             </div>
-            {sequencing.length > 4 && (
-              <div className="mt-4 text-[12px]" style={{ color: "var(--ink-3)" }}>
-                +{sequencing.length - 4} additional waves not shown.
-              </div>
-            )}
           </CardContent>
         </Card>
       )}
@@ -326,8 +327,21 @@ function DecommRow({ a }: { a: DecommissionAssessment }) {
 }
 
 function WaveCard({ wave }: { wave: { wave: number; description: string; table_fqns: string[]; pipeline_names: string[] } }) {
+  const [expanded, setExpanded] = useState(false);
+  const total = wave.table_fqns.length + wave.pipeline_names.length;
+  // Default: show first 6 of each. Expanded: show everything; the inner box
+  // is scrollable so the card stays visually contained.
+  const tableShown = expanded ? wave.table_fqns : wave.table_fqns.slice(0, 6);
+  const pipeShown  = expanded ? wave.pipeline_names : wave.pipeline_names.slice(0, 6);
+  const hidden = total - tableShown.length - pipeShown.length;
   return (
-    <div style={{ border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-elev)", padding: 14 }}>
+    <div
+      style={{
+        border: "1px solid var(--line)",
+        borderRadius: 8, background: "var(--bg-elev)",
+        padding: 14, display: "flex", flexDirection: "column",
+      }}
+    >
       <div className="eyebrow" style={{ color: "var(--brand-emerald-700)" }}>
         Wave {wave.wave}
       </div>
@@ -337,19 +351,36 @@ function WaveCard({ wave }: { wave: { wave: number; description: string; table_f
       <div className="mt-2.5 mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>
         {wave.table_fqns.length} tables · {wave.pipeline_names.length} pipelines
       </div>
-      <div className="mt-2 max-h-40 overflow-y-auto space-y-0.5">
-        {wave.table_fqns.slice(0, 5).map((t) => (
+      <div
+        className="mt-2 space-y-0.5"
+        style={{
+          flex: 1,
+          minHeight: 0,
+          maxHeight: expanded ? 360 : 180,
+          overflowY: "auto",
+          paddingRight: 4,
+        }}
+      >
+        {tableShown.map((t) => (
           <div key={t} className="mono" style={{ fontSize: 11, color: "var(--ink-2)" }}>{t}</div>
         ))}
-        {wave.pipeline_names.slice(0, 5).map((p) => (
+        {pipeShown.map((p) => (
           <div key={p} className="mono" style={{ fontSize: 11, color: "var(--brand-emerald-700)" }}>→ {p}</div>
         ))}
-        {(wave.table_fqns.length + wave.pipeline_names.length) > 10 && (
-          <div style={{ fontSize: 11, color: "var(--ink-4)" }}>
-            +{wave.table_fqns.length + wave.pipeline_names.length - 10} more
-          </div>
-        )}
       </div>
+      {(hidden > 0 || expanded) && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          style={{
+            marginTop: 8, alignSelf: "flex-start",
+            background: "transparent", border: 0, padding: 0, cursor: "pointer",
+            fontSize: 11, fontFamily: "var(--font-mono)",
+            color: "var(--brand-emerald-700)",
+          }}
+        >
+          {expanded ? "show less" : `show all ${total} →`}
+        </button>
+      )}
     </div>
   );
 }
