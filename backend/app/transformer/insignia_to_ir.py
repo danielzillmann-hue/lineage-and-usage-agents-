@@ -235,16 +235,31 @@ def _process_join(el: ET.Element, state: _BuilderState) -> None:
         "right": JoinType.RIGHT, "full": JoinType.FULL, "cross": JoinType.CROSS,
     }.get(how, JoinType.LEFT)
 
-    # Build merged column list — left passthroughs + right passthroughs minus duplicates
+    # Build merged column list. Always qualify with the join alias
+    # (`detail.X` for left, `master.X` for right) so BQ never has to guess
+    # when both sides expose the same column name (e.g. a foreign-key
+    # column that's also a primary key on the right side). Left wins on
+    # collisions — it's the kept side for LEFT JOINs.
     left_cols = state.upstream_cols(left)
     right_cols = state.upstream_cols(right)
     seen: set[str] = set()
     merged: list[ColumnDef] = []
-    for c in left_cols + right_cols:
-        if c.name.lower() in seen:
+    for c in left_cols:
+        key = c.name.lower()
+        if key in seen:
             continue
-        seen.add(c.name.lower())
-        merged.append(ColumnDef(name=c.name, expression=c.name, is_passthrough=True))
+        seen.add(key)
+        merged.append(ColumnDef(
+            name=c.name, expression=f"detail.{c.name}", is_passthrough=True,
+        ))
+    for c in right_cols:
+        key = c.name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(ColumnDef(
+            name=c.name, expression=f"master.{c.name}", is_passthrough=True,
+        ))
 
     # TA's sql_generator emits `FROM detail JOIN master`, so the XML's
     # left side (the kept side for LEFT JOIN) maps to detail_upstream.
@@ -344,6 +359,16 @@ def _process_transform(el: ET.Element, state: _BuilderState) -> None:
         for c in upstream_cols
         if c.name.lower() not in drop_cols
     ] + new_cols
+
+    # Pure column-list change (drops only, no new computed columns) —
+    # emit no CTE. The drop is already realised at the final SELECT
+    # projection because TargetMapping.columns reads from cols_by_step_id,
+    # which we set to the post-drop out_cols below. Net effect: identical
+    # output, one fewer trivial CTE.
+    if not new_cols:
+        state.current.cte_by_step_id[step_id] = upstream_cte
+        state.current.cols_by_step_id[step_id] = out_cols
+        return
 
     expr_node = ExpressionNode(
         cte_name=f"cte_{step_id}",

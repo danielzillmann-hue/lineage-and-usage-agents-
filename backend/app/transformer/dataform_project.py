@@ -80,13 +80,19 @@ def assemble_project(
     # 1. Pass-through every generated SQLX into the project tree, plus
     # the matching original-source files so the UI can render side-by-side.
     # Primary SQLX files get an `assertions` config block injected when
-    # we have inventory metadata for the target table.
+    # we have inventory metadata for the target table, plus layer-based
+    # `tags` so users can run `dataform run --tags=core` to materialise a
+    # single layer.
     for gf in generated:
-        if gf.kind == "primary" and table_metadata:
+        if gf.kind == "primary":
             target = gf.path.split("/")[-1].removesuffix(".sqlx").lower()
-            asserts = _assertions_for(target, table_metadata)
-            if asserts:
-                gf.content = _inject_assertions_into_sqlx(gf.content, asserts)
+            tags = _tags_for_target(target)
+            if tags:
+                gf.content = _inject_tags_into_sqlx(gf.content, tags)
+            if table_metadata:
+                asserts = _assertions_for(target, table_metadata)
+                if asserts:
+                    gf.content = _inject_assertions_into_sqlx(gf.content, asserts)
         out.files[gf.path] = gf.content
         if gf.kind == "primary":
             # File stem == the actual produced table name. Multi-stage
@@ -277,6 +283,39 @@ def _assertions_body(metadata: dict) -> str:
         nn_str = ", ".join(f'"{c}"' for c in non_null)
         pieces.append(f"    nonNull: [{nn_str}],")
     return "\n".join(pieces)
+
+
+def _tags_for_target(table_name: str) -> list[str]:
+    """Layer-based tags inferred from the target table name prefix.
+
+    These match Dataform's --tags filter so users can materialise a
+    single layer (`dataform run --tags=core`).
+    """
+    n = table_name.lower()
+    if n.startswith(("stg_", "stage_")):
+        return ["staging"]
+    if n.startswith("core_"):
+        return ["core"]
+    if n.startswith(("fact_", "dim_")):
+        return ["reporting"]
+    if n.startswith("final_"):
+        return ["delivery"]
+    return []
+
+
+def _inject_tags_into_sqlx(sqlx: str, tags: list[str]) -> str:
+    """Insert a `tags: [...]` field into the config block. Idempotent."""
+    if not tags or "tags:" in sqlx:
+        return sqlx
+    cfg_start = sqlx.find("config {")
+    if cfg_start < 0:
+        return sqlx
+    close_idx = sqlx.find("\n}", cfg_start)
+    if close_idx < 0:
+        return sqlx
+    tags_str = ", ".join(f'"{t}"' for t in tags)
+    insertion = f"  tags: [{tags_str}],\n"
+    return sqlx[:close_idx + 1] + insertion + sqlx[close_idx + 1:]
 
 
 def _inject_assertions_into_sqlx(sqlx: str, metadata: dict) -> str:
