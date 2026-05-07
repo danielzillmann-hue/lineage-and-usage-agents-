@@ -59,7 +59,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  chat: (id: string, body: ChatRequest) =>
+    jfetch<ChatResponse>(`/api/runs/${id}/chat`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };
+
+export type ChatTurn = { role: "user" | "assistant"; content: string };
+export type ChatRequest = { question: string; history: ChatTurn[] };
+export type ChatResponse = { answer: string; model: string; context_size: number };
 
 export type PushRequest = {
   repo_url: string;
@@ -67,6 +76,9 @@ export type PushRequest = {
   commit_message: string;
   github_token: string;
   force?: boolean;
+  as_pull_request?: boolean;
+  pr_title?: string;
+  pr_body?: string;
 };
 
 export type PushResultResponse = {
@@ -75,6 +87,8 @@ export type PushResultResponse = {
   commit_sha: string;
   commit_url: string;
   files_pushed: number;
+  pull_request_url?: string | null;
+  pull_request_number?: number | null;
 };
 
 export type ValidationIssue = {

@@ -37,6 +37,20 @@ export function ExecutiveSummaryView({ results }: { results: RunResults }) {
   const dollarsSaved = daysSaved * dailyRate;
   const speedupFactor = acceleratedDays > 0 ? manualDays / acceleratedDays : 0;
 
+  // BigQuery cost projection — heuristic. Storage at $0.02/GB-month for
+  // active storage in australia-southeast1; query at $5/TB. Daily refresh
+  // assumption for all pipelines. Excludes egress, BI Engine, slot reservations.
+  const totalBytes = (inv?.tables ?? []).reduce((sum, t) => sum + (t.bytes ?? 0), 0);
+  const totalGB = totalBytes / 1e9;
+  const totalTB = totalBytes / 1e12;
+  const storageMonth = totalGB * 0.02;
+  // Sources × pipelines × 30 days. Assume each pipeline scans every source
+  // every day (worst-case, most pipelines are not incremental).
+  const queryBytesMonth = totalBytes * Math.max(1, pipelineCount) * 30;
+  const queryMonth = (queryBytesMonth / 1e12) * 5;
+  const totalMonth = storageMonth + queryMonth;
+  const totalAnnual = totalMonth * 12;
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -80,6 +94,46 @@ export function ExecutiveSummaryView({ results }: { results: RunResults }) {
               the inventory agent. Assumes a single senior data engineer; parallelism
               reduces wall-clock further. Excludes business-validation, UAT, and
               decommission work — those scale with table count regardless of automation.
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {totalBytes > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>BigQuery cost projection</CardTitle>
+            <CardDescription>
+              Heuristic monthly run-rate assuming every pipeline refreshes daily and
+              scans its sources fully (worst-case, table type=&quot;table&quot;). Real
+              cost is typically lower with partition pruning, BI Engine cache, or
+              slot reservations.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <RoiStat
+                label="Source data size"
+                value={totalGB > 1024 ? `${totalTB.toFixed(2)} TB` : `${totalGB.toFixed(1)} GB`}
+                sub={`${formatNumber(inv?.tables.length ?? 0)} tables`}
+              />
+              <RoiStat
+                label="Storage / month"
+                value={`$${storageMonth.toFixed(2)}`}
+                sub="@ $0.02/GB · active storage"
+              />
+              <RoiStat
+                label="Total / month"
+                value={`$${totalMonth.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+                sub={`storage + query · ~$${(totalAnnual / 1000).toFixed(1)}k/yr`}
+                emphasised
+              />
+            </div>
+            <div className="mt-3 text-[12px] text-[var(--ink-3)] leading-relaxed">
+              Query cost = sources × pipelines × daily refresh × $5/TB scanned ≈{" "}
+              ${queryMonth.toLocaleString(undefined, { maximumFractionDigits: 0 })}/mo.
+              Use Dataform <code>incremental</code> tables for high-frequency
+              pipelines to cut this by 80–95%.
             </div>
           </CardContent>
         </Card>

@@ -15,6 +15,7 @@ import { UsageView } from "./UsageView";
 import { FindingsView } from "./FindingsView";
 import { MigrationView } from "./MigrationView";
 import { TransformView } from "./TransformView";
+import { AskView } from "./AskView";
 
 export function ResultsView({ runId }: { runId: string }) {
   const [run, setRun] = useState<Run | null>(null);
@@ -112,6 +113,7 @@ export function ResultsView({ runId }: { runId: string }) {
               <TabsTrigger value="usage">Usage</TabsTrigger>
               <TabsTrigger value="migration">Migration</TabsTrigger>
               <TabsTrigger value="transform">Transform</TabsTrigger>
+              <TabsTrigger value="ask">Ask</TabsTrigger>
               <TabsTrigger value="findings">
                 Findings
                 {findingCount > 0 && (
@@ -158,6 +160,11 @@ export function ResultsView({ runId }: { runId: string }) {
             <TabsContent value="transform" className="mt-0">
               <div style={{ marginTop: 0 }}>
                 <TransformView runId={runId} />
+              </div>
+            </TabsContent>
+            <TabsContent value="ask" className="mt-0">
+              <div style={{ marginTop: 0 }}>
+                <AskView runId={runId} />
               </div>
             </TabsContent>
             <TabsContent value="findings" className="mt-0">

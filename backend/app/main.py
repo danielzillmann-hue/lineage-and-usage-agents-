@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import buckets, runs, transform
+from app.routers import buckets, chat, runs, transform
 
 logging.basicConfig(level=get_settings().log_level)
 
@@ -26,6 +26,7 @@ app.include_router(buckets.router, prefix="/api/buckets", tags=["buckets"])
 app.include_router(buckets.get_demo_router(), prefix="/api", tags=["demo"])
 app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
 app.include_router(transform.router, prefix="/api/runs", tags=["transform"])
+app.include_router(chat.router, prefix="/api/runs", tags=["chat"])
 
 
 @app.get("/healthz")

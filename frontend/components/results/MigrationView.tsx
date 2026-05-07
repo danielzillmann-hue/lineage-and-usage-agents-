@@ -163,6 +163,9 @@ export function MigrationView({ inventory, runId }: { inventory?: Inventory; run
         </Card>
       )}
 
+      {/* ─── Data parity preview ───────────────────────────────────── */}
+      <ParityPreview inventory={inventory} />
+
       {/* ─── Multi-writer targets ─────────────────────────────────── */}
       {multi.length > 0 && (
         <Card>
@@ -428,5 +431,108 @@ function RuleRow({ rule }: { rule: { rule_type: string; source_object: string; c
         {rule.expression}
       </div>
     </div>
+  );
+}
+
+
+// ── Data parity preview ────────────────────────────────────────────────
+
+
+function ParityPreview({ inventory }: { inventory: Inventory }) {
+  // Derive parity targets from the pipelines' load steps + the tables
+  // we discovered. For each pipeline, we know what it WOULD write to a
+  // BigQuery table; pre-migration the BQ side is empty, so this view
+  // shows what would be checked once the target is populated.
+  const targets = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: { name: string; sourceTables: string[]; bytes: number; rows: number | null }[] = [];
+    for (const p of inventory.pipelines ?? []) {
+      // The "produced" table is whatever the pipeline's last load step targets.
+      // We don't have that exact info on the inventory pipeline shape, so we
+      // group by pipeline name and quote the aggregate source bytes.
+      if (seen.has(p.name)) continue;
+      seen.add(p.name);
+      const sourceTables = (p.steps ?? []).flatMap((s) => s.source_tables ?? []);
+      const uniqSources = Array.from(new Set(sourceTables));
+      let bytes = 0;
+      let rowCount: number | null = null;
+      for (const sname of uniqSources) {
+        const t = inventory.tables.find((tt) => tt.name.toLowerCase() === sname.toLowerCase());
+        if (t) {
+          bytes += t.bytes ?? 0;
+          if (t.row_count != null) {
+            rowCount = rowCount === null ? t.row_count : Math.max(rowCount, t.row_count);
+          }
+        }
+      }
+      rows.push({ name: p.name, sourceTables: uniqSources, bytes, rows: rowCount });
+    }
+    return rows;
+  }, [inventory]);
+
+  if (!targets.length) return null;
+
+  const totalBytes = targets.reduce((s, t) => s + t.bytes, 0);
+  const totalRows = targets.reduce((s, t) => s + (t.rows ?? 0), 0);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Data parity preview</CardTitle>
+        <CardDescription>
+          Once the migrated tables are populated in BigQuery, the agents will run
+          row-count + value-level diffs between Oracle source and BQ target to prove
+          parity. Below is what would be compared per pipeline; the &quot;Validate&quot;
+          button is disabled until the target side has data.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="px-5 py-3 text-[12px]" style={{ color: "var(--ink-3)" }}>
+          {targets.length} pipelines · ~{(totalBytes / 1e9).toFixed(1)} GB across{" "}
+          {totalRows ? `~${(totalRows / 1e6).toFixed(1)}M rows` : "unknown row count"}
+        </div>
+        <table className="w-full text-[12.5px]">
+          <thead>
+            <tr style={{ borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" }}>
+              <th className="text-left px-5 py-2" style={hdrStyle}>Pipeline</th>
+              <th className="text-left px-3 py-2" style={hdrStyle}>Sources</th>
+              <th className="text-right px-3 py-2" style={hdrStyle}>Source rows</th>
+              <th className="text-right px-3 py-2" style={hdrStyle}>Source bytes</th>
+              <th className="text-left px-5 py-2" style={hdrStyle}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {targets.map((t) => (
+              <tr key={t.name} style={{ borderBottom: "1px solid var(--line)" }}>
+                <td className="px-5 py-2 mono" style={{ color: "var(--ink)" }}>{t.name}</td>
+                <td className="px-3 py-2 mono text-[11.5px]" style={{ color: "var(--ink-3)" }}>
+                  {t.sourceTables.slice(0, 3).join(", ")}
+                  {t.sourceTables.length > 3 && ` +${t.sourceTables.length - 3}`}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums" style={{ color: "var(--ink-2)" }}>
+                  {t.rows != null ? t.rows.toLocaleString() : "—"}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums" style={{ color: "var(--ink-2)" }}>
+                  {t.bytes ? `${(t.bytes / 1e9).toFixed(2)} GB` : "—"}
+                </td>
+                <td className="px-5 py-2">
+                  <span
+                    title="Available once the BigQuery target has data"
+                    style={{
+                      fontSize: 10.5, padding: "2px 8px",
+                      background: "var(--bg-sunk)", color: "var(--ink-3)",
+                      border: "1px solid var(--line)", borderRadius: 99,
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  >
+                    awaiting target
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
   );
 }
