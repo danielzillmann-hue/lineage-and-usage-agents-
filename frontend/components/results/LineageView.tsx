@@ -13,7 +13,7 @@ import type { Inventory, Layer, LineageEdge, LineageGraph, Sensitivity } from "@
 //   external → purple (CSVs flowing IN that aren't from the DB)
 //   unknown  → grey
 type NodeKind =
-  | "raw" | "staging" | "core" | "pipeline" | "output" | "external"
+  | "raw" | "staging" | "core" | "pipeline" | "step" | "output" | "external"
   | "delivery_internal" | "delivery_external" | "unknown";
 
 const KIND_STYLES: Record<NodeKind, { fill: string; stroke: string; text: string; dot: string }> = {
@@ -21,6 +21,7 @@ const KIND_STYLES: Record<NodeKind, { fill: string; stroke: string; text: string
   staging:           { fill: "#FFF3E0", stroke: "#F57C00", text: "#E65100", dot: "#F57C00" },
   core:              { fill: "#E8F5E9", stroke: "#388E3C", text: "#1B5E20", dot: "#388E3C" },
   pipeline:          { fill: "#1F1F1F", stroke: "#1F1F1F", text: "#FFFFFF", dot: "#1F1F1F" },
+  step:              { fill: "#FAFAFA", stroke: "#9E9E9E", text: "#424242", dot: "#9E9E9E" },
   output:            { fill: "#FCE4EC", stroke: "#C2185B", text: "#880E4F", dot: "#C2185B" },
   external:          { fill: "#EDE7F6", stroke: "#512DA8", text: "#311B92", dot: "#512DA8" },
   delivery_internal: { fill: "#E0F2F1", stroke: "#00838F", text: "#004D40", dot: "#00838F" },
@@ -30,7 +31,7 @@ const KIND_STYLES: Record<NodeKind, { fill: string; stroke: string; text: string
 
 const KIND_LABEL: Record<NodeKind, string> = {
   raw: "Raw", staging: "Staging", core: "Core / Integration",
-  pipeline: "Pipeline", output: "Output CSV", external: "External source",
+  pipeline: "Pipeline", step: "Pipeline step", output: "Output CSV", external: "External source",
   delivery_internal: "Internal destination", delivery_external: "External destination",
   unknown: "Unknown",
 };
@@ -58,6 +59,7 @@ export function LineageView({
   const [fullscreen, setFullscreen] = useState(false);
   const [showEdgeLabels, setShowEdgeLabels] = useState(true);
   const [showSubgraphs, setShowSubgraphs] = useState(true);
+  const [showPipelineInternals, setShowPipelineInternals] = useState(false);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   // ESC exits fullscreen
@@ -86,12 +88,22 @@ export function LineageView({
   const inferKind = (fqn: string): NodeKind => {
     if (fqn.startsWith("DELIVERY_INT.")) return "delivery_internal";
     if (fqn.startsWith("DELIVERY_EXT.")) return "delivery_external";
-    if (fqn.startsWith("PIPELINE.")) return "pipeline";
+    if (fqn.startsWith("PIPELINE.")) {
+      // When showPipelineInternals is on for the focused pipeline, the step
+      // nodes (PIPELINE.<focused>.<step>) survive the collapse and render as
+      // their own kind so users can see the internal DAG.
+      const parts = fqn.split(".");
+      if (parts.length > 2 && showPipelineInternals && pipelineFilter && parts[1] === pipelineFilter) {
+        return "step";
+      }
+      return "pipeline";
+    }
     if (fqn.startsWith("OUTPUTS.")) return "output";
+    if (fqn.startsWith("EXTERNAL.")) return "external";
     const upper = fqn.toUpperCase();
     const last = upper.split(".").pop() ?? "";
     if (last.startsWith("STG_") || last.startsWith("STAGE_")) return "staging";
-    if (last.startsWith("CORE_")) return "core";
+    if (last.startsWith("CORE_") || last.startsWith("FACT_") || last.startsWith("DIM_")) return "core";
     return LAYER_TO_KIND[inferLayer(fqn)] ?? "unknown";
   };
 
@@ -146,15 +158,37 @@ export function LineageView({
     const collapse = (fqn: string): string => {
       if (fqn.startsWith("PIPELINE.")) {
         const parts = fqn.split(".");
+        // Keep step ids intact for the focused pipeline when internals are on.
+        if (parts.length > 2 && showPipelineInternals && parts[1] === pipelineFilter) {
+          return fqn;
+        }
         return parts.length >= 2 ? `${parts[0]}.${parts[1]}` : fqn;
       }
       return fqn;
     };
 
-    // Build collapsed adjacency for transitive BFS.
+    // When internals are on, seed BFS with EVERY step node of the focused
+    // pipeline. With internals off, edges all point at PIPELINE.<focused>
+    // (bare), but with internals on they point at PIPELINE.<focused>.<step> —
+    // so the bare-pipeline seed alone has no neighbours and BFS yields nothing.
+    if (showPipelineInternals) {
+      const stepPrefix = `${pipelineNodeId}.`;
+      for (const e of lineage.edges) {
+        if (e.source_fqn.startsWith(stepPrefix)) set.add(e.source_fqn);
+        if (e.target_fqn.startsWith(stepPrefix)) set.add(e.target_fqn);
+      }
+    }
+
+    // Build collapsed adjacency for transitive BFS. Modify-ops (UPDATE/
+    // DELETE/TRUNCATE/MERGE) don't *produce* data — they mutate it in
+    // place — so we skip them when walking ancestry. This prevents an
+    // unrelated side-pipeline that merely UPDATEs a shared table from
+    // being pulled in as an ancestor of every pipeline that reads it.
+    const modifyOps = new Set(["update", "delete", "truncate", "merge"]);
     const upstream: Record<string, string[]> = {};
     const downstream: Record<string, string[]> = {};
     for (const e of lineage.edges) {
+      if (modifyOps.has(e.operation)) continue;
       const cs = collapse(e.source_fqn);
       const ct = collapse(e.target_fqn);
       if (cs === ct) continue;
@@ -162,8 +196,13 @@ export function LineageView({
       (downstream[cs] ??= []).push(ct);
     }
 
+    // Snapshot the initial seed BEFORE any walking. Each walk seeds only from
+    // the focused pipeline's own nodes — not from ancestors picked up by an
+    // earlier walk — so the downstream walk doesn't follow shared raw tables
+    // into every other pipeline that reads them.
+    const seed = Array.from(set);
     const walk = (adj: Record<string, string[]>) => {
-      const queue: string[] = [pipelineNodeId];
+      const queue: string[] = [...seed];
       while (queue.length) {
         const node = queue.shift()!;
         for (const next of adj[node] ?? []) {
@@ -191,15 +230,19 @@ export function LineageView({
       }
     }
     return set;
-  }, [pipelineFilter, inventory, lineage]);
+  }, [pipelineFilter, inventory, lineage, showPipelineInternals]);
 
   // Build node set (excluding intra-pipeline step nodes — we collapse those to keep the graph readable)
   const { nodes, edges } = useMemo(() => {
     const allEdges = lineage?.edges ?? [];
-    // Collapse PIPELINE.<name>.<step> to PIPELINE.<name>
+    // Collapse PIPELINE.<name>.<step> to PIPELINE.<name>, except for the
+    // focused pipeline's internal steps when the toggle is on.
     const collapse = (fqn: string): string => {
       if (fqn.startsWith("PIPELINE.")) {
         const parts = fqn.split(".");
+        if (parts.length > 2 && showPipelineInternals && pipelineFilter && parts[1] === pipelineFilter) {
+          return fqn;
+        }
         return parts.length >= 2 ? `${parts[0]}.${parts[1]}` : fqn;
       }
       return fqn;
@@ -259,7 +302,7 @@ export function LineageView({
       nodes: [...nodeSet],
       edges: [...edgeSet.values()],
     };
-  }, [lineage, pipelineFilterSet, inventory]);
+  }, [lineage, pipelineFilterSet, inventory, pipelineFilter, showPipelineInternals]);
 
   // Topological depth layout — every node's column = its longest path from a
   // root. Lets chains of arbitrary length flow LR without being squashed into
@@ -294,6 +337,44 @@ export function LineageView({
     };
     nodes.forEach((n) => depth(n));
 
+    // Modify-only step nodes (UPDATE/DELETE/TRUNCATE statements that write
+    // to a target table without reading any upstream tables) topologically
+    // have depth 0 because they have no parents — which dumps them at the
+    // chart's far left, dangling away from the table they actually modify.
+    // Pin each such step to one column LEFT of its target so it clusters
+    // with the table it operates on.
+    for (const n of nodes) {
+      if (inferKind(n) !== "step") continue;
+      const inEdges = rev.get(n) ?? [];
+      if (inEdges.length > 0) continue; // has upstream — leave alone
+      const outEdges = adj.get(n) ?? [];
+      if (outEdges.length === 0) continue;
+      let targetDepth = -1;
+      for (const t of outEdges) {
+        targetDepth = Math.max(targetDepth, depthCache[t] ?? 0);
+      }
+      if (targetDepth > 0) depthCache[n] = targetDepth - 1;
+    }
+
+    // Pin all delivery destinations to the same rightmost column so SFTP /
+    // REST API endpoints line up cleanly at the chart's far right, regardless
+    // of how deep their upstream output CSV happens to sit.
+    let maxDepth = 0;
+    for (const n of nodes) maxDepth = Math.max(maxDepth, depthCache[n] ?? 0);
+    let deliveryDepth = maxDepth;
+    for (const n of nodes) {
+      const k = inferKind(n);
+      if (k === "delivery_internal" || k === "delivery_external") {
+        deliveryDepth = Math.max(deliveryDepth, (depthCache[n] ?? 0) + 1);
+      }
+    }
+    for (const n of nodes) {
+      const k = inferKind(n);
+      if (k === "delivery_internal" || k === "delivery_external") {
+        depthCache[n] = deliveryDepth;
+      }
+    }
+
     const byCol: Record<number, string[]> = {};
     for (const n of nodes) {
       const c = depthCache[n] ?? 0;
@@ -302,7 +383,7 @@ export function LineageView({
     // Stable sort within column: kind first (raw → staging → core → output),
     // then alphabetical, so layouts feel predictable.
     const kindOrder: Record<NodeKind, number> = {
-      external: 0, raw: 1, staging: 2, pipeline: 3, core: 4, output: 5,
+      external: 0, raw: 1, staging: 2, pipeline: 3, step: 3, core: 4, output: 5,
       delivery_internal: 6, delivery_external: 7, unknown: 8,
     };
     for (const c of Object.keys(byCol)) {
@@ -317,7 +398,9 @@ export function LineageView({
     const cols = Object.keys(byCol).map(Number).sort((a, b) => a - b);
     const colCount = cols.length || 1;
     const COL_PAD_LEFT = 110;
-    const COL_PAD_RIGHT = 110;
+    // Larger right pad so SFTP / REST API protocol labels rendered past the
+    // delivery destinations don't clip against the canvas edge.
+    const COL_PAD_RIGHT = 220;
     const usableW = W - COL_PAD_LEFT - COL_PAD_RIGHT;
     const colXs: number[] = cols.map((c, i) =>
       colCount === 1 ? W / 2 : COL_PAD_LEFT + (i * usableW) / (colCount - 1),
@@ -446,18 +529,21 @@ export function LineageView({
   // Critical: the parent gets explicit 100vh height and overflow:hidden so the
   // grid children — each with their own overflow-y:auto — actually scroll
   // instead of getting clipped at the viewport edge.
+  // Right inspector only takes space when a node is selected — otherwise the
+  // canvas grows into the freed real estate.
+  const gridCols = selected ? "320px 1fr 340px" : "320px 1fr";
   const containerStyle: React.CSSProperties = fullscreen
     ? {
         position: "fixed", inset: 0, zIndex: 80,
         display: "grid",
-        gridTemplateColumns: "320px 1fr 340px",
+        gridTemplateColumns: gridCols,
         gridTemplateRows: "100vh",
         height: "100vh",
         overflow: "hidden",
         background: "var(--bg)",
       }
     : {
-        display: "grid", gridTemplateColumns: "320px 1fr 340px",
+        display: "grid", gridTemplateColumns: gridCols,
         minHeight: 720, background: "var(--bg)",
       };
 
@@ -605,6 +691,23 @@ export function LineageView({
             />
             Chain groupings
           </label>
+          <label
+            style={{
+              display: "flex", alignItems: "center", gap: 10,
+              fontSize: 13, cursor: pipelineFilter ? "pointer" : "not-allowed",
+              color: pipelineFilter ? "var(--ink-2)" : "var(--ink-4)",
+            }}
+            title={pipelineFilter ? "Expand the focused pipeline's internal steps" : "Select a focus pipeline first"}
+          >
+            <input
+              type="checkbox"
+              checked={showPipelineInternals && !!pipelineFilter}
+              onChange={() => setShowPipelineInternals((v) => !v)}
+              disabled={!pipelineFilter}
+              style={{ accentColor: "var(--brand-emerald)" }}
+            />
+            Pipeline internals
+          </label>
         </div>
 
         <div className="eyebrow" style={{ marginTop: 28 }}>Stats</div>
@@ -694,10 +797,10 @@ export function LineageView({
         </div>
       </div>
 
-      {/* ─── Inspector ───────────────────────────────────────── */}
+      {/* ─── Inspector — only mounted when a node is selected ──── */}
+      {sel && (
       <aside style={{ background: "var(--bg-elev)", padding: 24, overflowY: "auto", ...cellMinHeight }}>
-        {sel ? (
-          <>
+        <>
             <div className="eyebrow">{KIND_LABEL[inferKind(sel.id)]}</div>
             <h3
               className="mono"
@@ -753,13 +856,9 @@ export function LineageView({
                 ))}
               </ul>
             </div>
-          </>
-        ) : (
-          <div style={{ color: "var(--ink-3)", fontSize: 13, lineHeight: 1.6 }}>
-            Click any node to see its upstream and downstream.
-          </div>
-        )}
+        </>
       </aside>
+      )}
     </div>
   );
 }
@@ -1052,6 +1151,16 @@ function GraphSVG({
           );
         }
         const lbl = showEdgeLabels && !dim ? labelFor(e.operation) : "";
+        // Delivery edges (output → SFTP / REST API / etc.) put the protocol
+        // label PAST the destination on its right side, so it reads as where
+        // the data goes after landing rather than as a mid-edge annotation.
+        // x2 = b.x - 88 (destination left anchor); the right edge sits at
+        // x2 + 176, so we offset another 12px past that for breathing room.
+        const dstKind = inferKind(e.dst);
+        const isDeliveryEdge = dstKind === "delivery_internal" || dstKind === "delivery_external";
+        const lblWidth = lbl.length * 6.8 + 12;
+        const tx = isDeliveryEdge ? x2 + 188 : midX;
+        const ty = isDeliveryEdge ? y2 : (y1 + y2) / 2;
         return (
           <g key={i}>
             <path
@@ -1066,11 +1175,11 @@ function GraphSVG({
               style={{ transition: "opacity .2s, stroke .2s" }}
             />
             {lbl && (
-              <g transform={`translate(${midX}, ${(y1 + y2) / 2})`}>
+              <g transform={`translate(${tx}, ${ty})`}>
                 <rect
-                  x={-(lbl.length * 3.4 + 6)}
+                  x={isDeliveryEdge ? 0 : -lblWidth / 2}
                   y={-7}
-                  width={lbl.length * 6.8 + 12}
+                  width={lblWidth}
                   height={14}
                   rx={3}
                   fill="#FFFFFF"
@@ -1078,7 +1187,8 @@ function GraphSVG({
                   strokeWidth={0.75}
                 />
                 <text
-                  textAnchor="middle"
+                  textAnchor={isDeliveryEdge ? "start" : "middle"}
+                  x={isDeliveryEdge ? 6 : 0}
                   y={4}
                   style={{
                     fontFamily: "var(--font-mono)",
@@ -1106,11 +1216,15 @@ function GraphSVG({
         const dim = !isMatch || !isFocused || !layerOk(id);
         const isSel = selected === id;
         const isPipeline = kind === "pipeline";
+        const isStep = kind === "step";
         const isDelivery = kind === "delivery_internal" || kind === "delivery_external";
 
         let label: string;
         if (isPipeline) {
           label = id.replace(/^PIPELINE\./, "");
+        } else if (isStep) {
+          // PIPELINE.<pipeline>.<step> → just <step>
+          label = id.split(".").pop() ?? id;
         } else if (isDelivery) {
           label = deliveryLabel ? deliveryLabel(id) : id.split(".").slice(1).join(".");
         } else if (id.startsWith("OUTPUTS.") || id.startsWith("SOURCE.")) {
@@ -1119,9 +1233,10 @@ function GraphSVG({
           label = id.split(".").slice(-2).join(".");
         }
 
-        const w = isPipeline ? 175 : isDelivery ? 200 : 168;
-        const h = 30;
+        const w = isPipeline ? 175 : isDelivery ? 200 : isStep ? 130 : 168;
+        const h = isStep ? 24 : 30;
         // Tables → parallelogram (data-flow). Pipelines → rounded rect (process).
+        // Steps → small dashed rounded rect (internal, lighter weight).
         // Delivery destinations → hexagon (external system / consumer).
         const slant = 8;
         const cx = p.x;
@@ -1136,6 +1251,18 @@ function GraphSVG({
             fill={c.fill}
             stroke={isSel ? "#0FB37A" : c.stroke}
             strokeWidth={isSel ? 2 : 1.5}
+          />
+        ) : isStep ? (
+          <rect
+            x={cx - w / 2}
+            y={cy - h / 2}
+            width={w}
+            height={h}
+            rx={6}
+            fill={c.fill}
+            stroke={isSel ? "#0FB37A" : c.stroke}
+            strokeWidth={isSel ? 2 : 1}
+            strokeDasharray={isSel ? undefined : "3 2"}
           />
         ) : isDelivery ? (
           <polygon

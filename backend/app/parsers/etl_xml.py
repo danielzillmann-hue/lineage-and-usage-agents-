@@ -35,18 +35,23 @@ log = logging.getLogger(__name__)
 @dataclass
 class StepNode:
     id: str
-    kind: str  # extract | transform | join | aggregate | load
+    kind: str  # extract | extract_csv | transform | join | aggregate | load | execute_sql
     inputs: list[str] = field(default_factory=list)
     raw: ET.Element | None = None
     # Column model: list preserves ordering. Each column has provenance — which
     # upstream (step, column) feeds it. When None it's a freshly created column.
     columns: list[str] = field(default_factory=list)
     column_sources: dict[str, list[tuple[str | None, str | None]]] = field(default_factory=dict)
-    # For extract steps:
+    # For extract / execute_sql steps:
     source_tables: list[str] = field(default_factory=list)
     source_query: str | None = None
-    # For load steps:
-    output_path: str | None = None
+    # For load / execute_sql steps:
+    output_path: str | None = None     # CSV file path
+    output_table: str | None = None    # Oracle target table (load type="oracle")
+    # For extract_csv steps:
+    external_path: str | None = None
+    # SQL-driven steps (execute_sql) — INSERT/UPDATE/DELETE/TRUNCATE/MERGE
+    sql_kind: str | None = None
     # Within-step ops, for human-readable transform descriptions
     operations: list[str] = field(default_factory=list)
 
@@ -98,6 +103,8 @@ def parse_pipeline(xml_text: str, filename: str) -> Pipeline | None:
     for child in steps_el:
         if child.tag == "extract":
             _parse_extract(child, pl)
+        elif child.tag == "extract_csv":
+            _parse_extract_csv(child, pl)
         elif child.tag == "transform":
             _parse_transform(child, pl)
         elif child.tag == "join":
@@ -106,6 +113,8 @@ def parse_pipeline(xml_text: str, filename: str) -> Pipeline | None:
             _parse_aggregate(child, pl)
         elif child.tag == "load":
             _parse_load(child, pl)
+        elif child.tag == "execute_sql":
+            _parse_execute_sql(child, pl)
     return pl
 
 
@@ -259,17 +268,128 @@ def _parse_aggregate(el: ET.Element, pl: Pipeline) -> None:
 
 
 def _parse_load(el: ET.Element, pl: Pipeline) -> None:
-    step_id = "load"
+    # Make load step ids unique — a single pipeline can load to multiple targets.
+    base = el.attrib.get("id") or "load"
+    step_id = base if base not in pl.steps else f"{base}_{len(pl.steps)}"
     inp = el.attrib.get("input")
     path = el.attrib.get("path")
-    node = StepNode(id=step_id, kind="load", inputs=[inp] if inp else [], output_path=path)
+    table = el.attrib.get("table")
+    load_type = (el.attrib.get("type") or "").lower()
+    node = StepNode(
+        id=step_id, kind="load", inputs=[inp] if inp else [],
+        output_path=path if (path and load_type != "oracle") else None,
+        output_table=(table.upper() if table and (load_type == "oracle" or table) else None),
+    )
     upstream = pl.steps.get(inp) if inp else None
     if upstream:
         node.columns = list(upstream.columns)
         for c in upstream.columns:
             node.column_sources[c] = [(inp, c)]
+    if node.output_table:
+        node.operations.append(f"load → {node.output_table}")
     pl.steps[step_id] = node
-    pl.load_step_id = step_id
+    # Only set the pipeline's primary load_step_id for the CSV output (the
+    # canonical "deliverable" of the pipeline). Oracle table loads are recorded
+    # but don't override the CSV target.
+    if path and load_type != "oracle":
+        pl.load_step_id = step_id
+    elif pl.load_step_id is None:
+        pl.load_step_id = step_id
+
+
+def _parse_extract_csv(el: ET.Element, pl: Pipeline) -> None:
+    """External CSV input (e.g. tax_brackets.csv). Renders as 'external'."""
+    step_id = el.attrib.get("id") or f"extract_csv_{len(pl.steps)}"
+    path = el.attrib.get("path") or ""
+    node = StepNode(id=step_id, kind="extract", external_path=path)
+    # We don't know the columns of an external CSV — leave empty; lineage
+    # collapses table-level when columns aren't available.
+    node.operations.append(f"read external {path.split('/')[-1]}")
+    pl.steps[step_id] = node
+
+
+def _parse_execute_sql(el: ET.Element, pl: Pipeline) -> None:
+    """SQL-driven steps — INSERT INTO / UPDATE / DELETE / TRUNCATE / MERGE.
+
+    Uses sqlglot to extract source tables and the target table. Produces
+    column-level edges where possible (column-aligned INSERTs); falls back to
+    table-level edges for complex statements.
+    """
+    step_id = el.attrib.get("id") or f"sql_{len(pl.steps)}"
+    query = (el.findtext("query") or "").strip()
+    node = StepNode(id=step_id, kind="execute_sql", source_query=query)
+    node.sql_kind, target, sources = _classify_sql(query)
+    if target:
+        node.output_table = target.upper()
+    for s in sources:
+        if s.upper() not in [t.upper() for t in node.source_tables]:
+            node.source_tables.append(s.upper())
+    if node.sql_kind:
+        node.operations.append(f"{node.sql_kind.lower()} → {target or '(none)'}")
+    pl.steps[step_id] = node
+
+
+def _classify_sql(sql: str) -> tuple[str | None, str | None, list[str]]:
+    """Return (kind, target_table, source_tables).
+
+    kind ∈ {INSERT, UPDATE, DELETE, TRUNCATE, MERGE, SELECT, None}
+    """
+    if not sql:
+        return None, None, []
+    try:
+        tree = sqlglot.parse_one(sql, dialect="oracle")
+    except Exception:
+        return None, None, []
+    if isinstance(tree, exp.Insert):
+        target = _table_name(tree.this if isinstance(tree.this, exp.Table)
+                             else tree.this.find(exp.Table) if tree.this else None)
+        sources: list[str] = []
+        sel = tree.find(exp.Select)
+        if sel:
+            for t in sel.find_all(exp.Table):
+                n = _table_name(t)
+                if n:
+                    sources.append(n)
+        return "INSERT", target, sources
+    if isinstance(tree, exp.Update):
+        target = _table_name(tree.this if isinstance(tree.this, exp.Table) else None)
+        sources = [_table_name(t) for t in tree.find_all(exp.Table) if _table_name(t)]
+        # Drop the target from the source list — UPDATE doesn't move from itself
+        if target:
+            sources = [s for s in sources if s and s.upper() != target.upper()]
+        return "UPDATE", target, [s for s in sources if s]
+    if isinstance(tree, exp.Delete):
+        return "DELETE", _table_name(tree.this if isinstance(tree.this, exp.Table) else None), []
+    if isinstance(tree, exp.TruncateTable):
+        # sqlglot may parse TRUNCATE as Command; handle below if so.
+        tbl = tree.this if isinstance(tree.this, exp.Table) else None
+        return "TRUNCATE", _table_name(tbl), []
+    if isinstance(tree, exp.Merge):
+        target = _table_name(tree.this if isinstance(tree.this, exp.Table) else None)
+        sources = [_table_name(t) for t in tree.find_all(exp.Table)
+                   if _table_name(t) and _table_name(t) != target]
+        return "MERGE", target, [s for s in sources if s]
+    if isinstance(tree, exp.Select):
+        sources = [_table_name(t) for t in tree.find_all(exp.Table) if _table_name(t)]
+        return "SELECT", None, [s for s in sources if s]
+    # Fallback for parser-as-Command (e.g. TRUNCATE in some dialects)
+    text = sql.strip().upper()
+    if text.startswith("TRUNCATE"):
+        # Naive extract: "TRUNCATE TABLE NAME" → NAME
+        parts = text.split()
+        for i, t in enumerate(parts):
+            if t == "TABLE" and i + 1 < len(parts):
+                return "TRUNCATE", parts[i + 1].rstrip(";"), []
+        return "TRUNCATE", None, []
+    return None, None, []
+
+
+def _table_name(t) -> str | None:
+    if t is None:
+        return None
+    if isinstance(t, exp.Table):
+        return t.name.upper()
+    return None
 
 
 # ─── 2. SQL helper ────────────────────────────────────────────────────────
@@ -304,18 +424,29 @@ def _parse_select_columns(query: str) -> tuple[list[str], list[str]]:
 def to_lineage_edges(pl: Pipeline) -> list[ColumnEdge]:
     """Produce column-level edges for one pipeline.
 
-    Three flavors of edge:
+    Edge flavours:
       - extract:    (oracle.table, col) → (step, col)
-      - intra-pipe: (step, col)         → (step, col)
-      - load:       (step, col)         → (csv_path, col)
+      - extract_csv: (external.csv)      → (step, *)
+      - intra-pipe: (step, col)          → (step, col)
+      - load (csv): (step, col)          → (csv_path, col)
+      - load (table): (step, col)        → (oracle.table, col)
+      - execute_sql: (oracle.src, *)     → (oracle.tgt, *)   — table-level
     """
     edges: list[ColumnEdge] = []
-    csv_path = None
-    if pl.load_step_id:
-        csv_path = pl.steps[pl.load_step_id].output_path
 
     for step in pl.steps.values():
         if step.kind == "extract":
+            if step.external_path:
+                # extract_csv → external source feeding this step
+                edges.append(ColumnEdge(
+                    source_kind="external", source_object=step.external_path.split("/")[-1],
+                    source_column="*",
+                    target_kind="step", target_object=f"{pl.name}.{step.id}", target_column="*",
+                    operation="extract",
+                    detail=f"external CSV: {step.external_path}",
+                    pipeline=pl.name,
+                ))
+                continue
             for col, sources in step.column_sources.items():
                 for tbl, src_col in sources:
                     if tbl is None:
@@ -327,17 +458,79 @@ def to_lineage_edges(pl: Pipeline) -> list[ColumnEdge]:
                         detail=(step.source_query or "")[:200],
                         pipeline=pl.name,
                     ))
+        elif step.kind == "execute_sql":
+            # Route through the pipeline step so the pipeline appears as a
+            # node in the chain (otherwise SQL-only stg pipelines disappear).
+            if step.output_table and step.source_tables:
+                for src in step.source_tables:
+                    edges.append(ColumnEdge(
+                        source_kind="oracle", source_object=src, source_column="*",
+                        target_kind="step", target_object=f"{pl.name}.{step.id}", target_column="*",
+                        operation=(step.sql_kind or "execute_sql").lower(),
+                        detail=(step.source_query or "")[:200],
+                        pipeline=pl.name,
+                    ))
+                edges.append(ColumnEdge(
+                    source_kind="step", source_object=f"{pl.name}.{step.id}", source_column="*",
+                    target_kind="oracle", target_object=step.output_table, target_column="*",
+                    operation=(step.sql_kind or "execute_sql").lower(),
+                    detail=(step.source_query or "")[:200],
+                    pipeline=pl.name,
+                ))
+            elif step.output_table:
+                # No sources detected (e.g. INSERT INTO X VALUES) — still emit
+                # the pipeline → table edge so the pipeline owns the table.
+                edges.append(ColumnEdge(
+                    source_kind="step", source_object=f"{pl.name}.{step.id}", source_column="*",
+                    target_kind="oracle", target_object=step.output_table, target_column="*",
+                    operation=(step.sql_kind or "execute_sql").lower(),
+                    detail=(step.source_query or "")[:200],
+                    pipeline=pl.name,
+                ))
+            elif step.source_tables and step.sql_kind == "SELECT":
+                for src in step.source_tables:
+                    edges.append(ColumnEdge(
+                        source_kind="oracle", source_object=src, source_column="*",
+                        target_kind="step", target_object=f"{pl.name}.{step.id}", target_column="*",
+                        operation="select",
+                        detail=(step.source_query or "")[:200],
+                        pipeline=pl.name,
+                    ))
+        elif step.kind == "load":
+            # Determine the target — prefer Oracle table, else CSV path.
+            if step.output_table:
+                for col, sources in step.column_sources.items():
+                    for src_step, src_col in sources:
+                        if not src_step or not src_col:
+                            continue
+                        edges.append(ColumnEdge(
+                            source_kind="step", source_object=f"{pl.name}.{src_step}", source_column=src_col,
+                            target_kind="oracle", target_object=step.output_table, target_column=col,
+                            operation="load",
+                            detail=f"load → {step.output_table}",
+                            pipeline=pl.name,
+                        ))
+            elif step.output_path:
+                for col, sources in step.column_sources.items():
+                    for src_step, src_col in sources:
+                        if not src_step or not src_col:
+                            continue
+                        edges.append(ColumnEdge(
+                            source_kind="step", source_object=f"{pl.name}.{src_step}", source_column=src_col,
+                            target_kind="load", target_object=step.output_path, target_column=col,
+                            operation="load",
+                            detail="; ".join(step.operations) if step.operations else None,
+                            pipeline=pl.name,
+                        ))
         else:
             for col, sources in step.column_sources.items():
                 for src_step, src_col in sources:
                     if not src_step or not src_col:
                         continue
-                    target_obj = (csv_path or step.id) if step.kind == "load" else f"{pl.name}.{step.id}"
-                    target_kind = "load" if step.kind == "load" else "step"
                     edges.append(ColumnEdge(
                         source_kind="step", source_object=f"{pl.name}.{src_step}", source_column=src_col,
-                        target_kind=target_kind, target_object=target_obj, target_column=col,
-                        operation=step.kind if step.kind != "load" else "load",
+                        target_kind="step", target_object=f"{pl.name}.{step.id}", target_column=col,
+                        operation=step.kind,
                         detail="; ".join(step.operations) if step.operations else None,
                         pipeline=pl.name,
                     ))

@@ -145,6 +145,10 @@ def _fqn_for(kind: str, obj: str) -> str:
         # CSV file output
         short = obj.split("/")[-1]
         return f"OUTPUTS.{short.removesuffix('.csv').upper()}"
+    if kind == "external":
+        # External CSV input (e.g. tax_brackets.csv) — non-Oracle source.
+        short = obj.split("/")[-1]
+        return f"EXTERNAL.{short.removesuffix('.csv').upper()}"
     if kind == "step":
         # Pipeline step — keep as-is (already pipeline.step format)
         return f"PIPELINE.{obj}"
