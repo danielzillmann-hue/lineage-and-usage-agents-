@@ -11,6 +11,7 @@ class AgentName(str, Enum):
     USAGE = "usage"
     SUMMARY = "summary"
     TRANSFORM = "transform"
+    ORCHESTRATION = "orchestration"
 
 
 class AgentStatus(str, Enum):

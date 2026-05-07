@@ -14,6 +14,7 @@ const AGENTS: { id: AgentName; name: string; desc: string }[] = [
   { id: "usage",     name: "Usage Agent",             desc: "Pipeline run history, success rates, undocumented executions" },
   { id: "summary",   name: "Executive Summary Agent", desc: "Synthesis: headline, findings, recommendations" },
   { id: "transform", name: "Transformation Agent",    desc: "Generate Dataform SQLX from the Oracle pipelines (BigQuery target)" },
+  { id: "orchestration", name: "Orchestration Agent", desc: "Generate a GitHub Actions workflow (compile-on-push + scheduled run)" },
 ];
 
 export function SetupForm() {
@@ -22,7 +23,7 @@ export function SetupForm() {
   const [bucket, setBucket] = useState("");
   const [prefix, setPrefix] = useState("");
   const [outputsPrefix, setOutputsPrefix] = useState<string | null>(null);
-  const [active, setActive] = useState<AgentName[]>(["inventory", "lineage", "usage", "summary", "transform"]);
+  const [active, setActive] = useState<AgentName[]>(["inventory", "lineage", "usage", "summary", "transform", "orchestration"]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);

@@ -54,6 +54,27 @@ export const api = {
   },
   transformDownloadUrl: (id: string) =>
     `${API_BASE}/api/runs/${id}/transform/download.zip`,
+  transformPushToGithub: (id: string, body: PushRequest) =>
+    jfetch<PushResultResponse>(`/api/runs/${id}/transform/push`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+};
+
+export type PushRequest = {
+  repo_url: string;
+  branch: string;
+  commit_message: string;
+  github_token: string;
+  force?: boolean;
+};
+
+export type PushResultResponse = {
+  repo_url: string;
+  branch: string;
+  commit_sha: string;
+  commit_url: string;
+  files_pushed: number;
 };
 
 export type ValidationIssue = {

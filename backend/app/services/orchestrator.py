@@ -12,6 +12,7 @@ from datetime import datetime
 from app.agents import (
     inventory_agent,
     lineage_agent,
+    orchestration_agent,
     summary_agent,
     transformation_agent,
     usage_agent,
@@ -125,6 +126,9 @@ async def _execute(run_id: str, req: RunRequest) -> None:
                     lambda: transformation_agent.run(req, results, _emit(run_id), run_id))
         # Transform output lives in GCS, not in the inline RunResults — the
         # frontend's Transform tab reads it via the dedicated /transform/* API.
+    if AgentName.ORCHESTRATION in req.agents:
+        await _safe(AgentName.ORCHESTRATION,
+                    lambda: orchestration_agent.run(req, results, _emit(run_id), run_id))
 
     run.status = "failed" if any_failed else "completed"
     await store.upsert_run(run)
