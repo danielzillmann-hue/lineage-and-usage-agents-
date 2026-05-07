@@ -19,6 +19,7 @@ from app.agents.base import EmitFn, log_event
 from app.models.run import AgentName, RunRequest, StreamEvent
 from app.services import gcs, transform_storage
 from app.transformer import generate_project
+from app.transformer.procedure_converter import convert_all as convert_procedures
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +77,28 @@ async def run(req: RunRequest, results, emit: EmitFn, run_id: str) -> None:
                         f"inventory metadata for {len(table_metadata)} tables ({with_keys} with PKs) — generating assertions")
 
     project = generate_project(xml_files, views=views, table_metadata=table_metadata)
+
+    # PL/SQL procedure conversion via Gemini. Procedures come from the
+    # inventory agent's introspection; we translate each one in parallel
+    # and add the result to the project under definitions/procedures/.
+    procedures = _extract_procedures(results)
+    if procedures:
+        await log_event(emit, AgentName.TRANSFORM,
+                        f"converting {len(procedures)} PL/SQL procedures via Gemini 2.5 Pro")
+        try:
+            converted = await convert_procedures(procedures)
+            for c in converted:
+                project.files[f"definitions/procedures/{c.name.lower()}.sqlx"] = c.sqlx
+                project.operations.append(f"{c.name.lower()} (procedure)")
+                if c.warnings:
+                    project.warnings.extend([f"{c.name}: {w}" for w in c.warnings])
+            success_count = sum(1 for c in converted if not c.warnings)
+            await log_event(emit, AgentName.TRANSFORM,
+                            f"procedures converted: {success_count}/{len(converted)} successfully")
+        except Exception as e:  # noqa: BLE001
+            log.warning("procedure conversion batch failed: %s", e)
+            await log_event(emit, AgentName.TRANSFORM,
+                            f"procedure conversion failed: {e}")
 
     await log_event(emit, AgentName.TRANSFORM,
                     f"generated {len(project.pipelines)} pipelines, "
@@ -135,6 +158,26 @@ def _extract_views(results) -> dict[str, str]:
         if not sql:
             continue
         out[t.name.lower()] = sql
+    return out
+
+
+def _extract_procedures(results) -> list[tuple[str, str, str]]:
+    """Pull (name, schema, source) tuples for every procedure that has
+    a non-empty body. Filters PACKAGE/TRIGGER kinds — those need
+    different handling.
+    """
+    inv = getattr(results, "inventory", None)
+    if inv is None:
+        return []
+    out: list[tuple[str, str, str]] = []
+    for p in getattr(inv, "procedures", []) or []:
+        kind = getattr(p, "kind", "") or ""
+        if kind not in ("PROCEDURE", "FUNCTION"):
+            continue
+        src = getattr(p, "source", None) or ""
+        if not src.strip():
+            continue
+        out.append((p.name, p.schema_name, src))
     return out
 
 
