@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  Database, GitBranch, Activity, Sparkles, CheckCircle2, AlertCircle, Loader2, ArrowRight,
+  Database, GitBranch, Activity, Sparkles, FileCode2, CheckCircle2, AlertCircle, Loader2, ArrowRight,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -18,6 +18,7 @@ const AGENT_META: Record<AgentName, { title: string; icon: React.ComponentType<{
   lineage:   { title: "Lineage",           icon: GitBranch, tint: "from-[#7ebcf9] to-[#00b4f0]" },
   usage:     { title: "Usage",             icon: Activity,  tint: "from-[#00b4f0] to-[#18c29c]" },
   summary:   { title: "Executive summary", icon: Sparkles,  tint: "from-[#ff6b47] to-[#f6b400]" },
+  transform: { title: "Transformation",    icon: FileCode2, tint: "from-[#18c29c] to-[#0fb37a]" },
 };
 
 interface AgentTranscriptEntry {
@@ -32,7 +33,7 @@ export function LiveRun({ runId }: { runId: string }) {
   const [transcript, setTranscript] = useState<AgentTranscriptEntry[]>([]);
   const [activeAgent, setActiveAgent] = useState<AgentName | null>(null);
   const [results, setResults] = useState<Record<AgentName, Record<string, unknown> | null>>({
-    inventory: null, lineage: null, usage: null, summary: null,
+    inventory: null, lineage: null, usage: null, summary: null, transform: null,
   });
   const [done, setDone] = useState(false);
   const transcriptRef = useRef<HTMLDivElement>(null);

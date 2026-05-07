@@ -10,6 +10,7 @@ class AgentName(str, Enum):
     LINEAGE = "lineage"
     USAGE = "usage"
     SUMMARY = "summary"
+    TRANSFORM = "transform"
 
 
 class AgentStatus(str, Enum):

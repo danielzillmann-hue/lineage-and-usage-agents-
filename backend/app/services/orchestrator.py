@@ -9,7 +9,13 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime
 
-from app.agents import inventory_agent, lineage_agent, summary_agent, usage_agent
+from app.agents import (
+    inventory_agent,
+    lineage_agent,
+    summary_agent,
+    transformation_agent,
+    usage_agent,
+)
 from app.models.run import AgentName, AgentRunState, AgentStatus, Run, RunRequest, StreamEvent
 from app.models.schema import RunResults
 from app.services import store
@@ -114,6 +120,11 @@ async def _execute(run_id: str, req: RunRequest) -> None:
         await _safe(AgentName.SUMMARY, lambda: summary_agent.run(req, results, _emit(run_id)))
         results.summary = summary_agent.last_result
         await store.save_results(run_id, results)
+    if AgentName.TRANSFORM in req.agents:
+        await _safe(AgentName.TRANSFORM,
+                    lambda: transformation_agent.run(req, results, _emit(run_id), run_id))
+        # Transform output lives in GCS, not in the inline RunResults — the
+        # frontend's Transform tab reads it via the dedicated /transform/* API.
 
     run.status = "failed" if any_failed else "completed"
     await store.upsert_run(run)

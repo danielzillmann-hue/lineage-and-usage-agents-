@@ -1,6 +1,6 @@
 // Mirrors backend/app/models — keep in sync with Pydantic.
 
-export type AgentName = "inventory" | "lineage" | "usage" | "summary";
+export type AgentName = "inventory" | "lineage" | "usage" | "summary" | "transform";
 export type AgentStatus = "pending" | "running" | "completed" | "failed";
 export type RunStatus = "pending" | "running" | "completed" | "failed";
 export type Layer = "raw" | "staging" | "integration" | "reporting" | "output" | "unknown";
