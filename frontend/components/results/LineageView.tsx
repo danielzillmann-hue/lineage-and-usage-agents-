@@ -50,6 +50,8 @@ export function LineageView({
   });
   const [pipelineFilter, setPipelineFilter] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [showEdgeLabels, setShowEdgeLabels] = useState(true);
+  const [showSubgraphs, setShowSubgraphs] = useState(true);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   // ESC exits fullscreen
@@ -152,21 +154,29 @@ export function LineageView({
       }
       return fqn;
     };
+    // When multiple column-level edges roll up between the same pair of
+    // table/pipeline nodes, pick the most informative operation as the label.
+    const opPriority: Record<string, number> = {
+      aggregate: 100, join: 90, transform: 80, VIEW: 70, fk: 60,
+      extract: 30, load: 20, pipeline: 10,
+    };
 
     const nodeSet = new Set<string>();
-    const edgeSet = new Map<string, { src: string; dst: string }>();
+    const edgeSet = new Map<string, { src: string; dst: string; operation: string }>();
     for (const e of allEdges) {
       const s = collapse(e.source_fqn);
       const t = collapse(e.target_fqn);
       if (s === t) continue;
-      // Pipeline-isolation filter: drop edges that don't touch the focused pipeline
       if (pipelineFilterSet) {
         if (!pipelineFilterSet.has(s) && !pipelineFilterSet.has(t)) continue;
       }
       nodeSet.add(s);
       nodeSet.add(t);
       const key = `${s}→${t}`;
-      if (!edgeSet.has(key)) edgeSet.set(key, { src: s, dst: t });
+      const cur = edgeSet.get(key);
+      if (!cur || (opPriority[e.operation] ?? 0) > (opPriority[cur.operation] ?? 0)) {
+        edgeSet.set(key, { src: s, dst: t, operation: e.operation });
+      }
     }
     return {
       nodes: [...nodeSet],
@@ -298,6 +308,51 @@ export function LineageView({
   );
 
   const sel = selected ? { id: selected, layer: normalizeLayer(inferLayer(selected)) } : null;
+
+  // Subgraph detection — identify per-output chains and the nodes exclusive
+  // to each one. Walk upstream from every output CSV to compute its ancestor
+  // set; nodes that lead to exactly one output get grouped behind a labelled
+  // bounding box. Shared nodes (like MEMBERS feeding many chains) stay
+  // outside any subgraph.
+  const subgraphs = useMemo(() => {
+    if (!showSubgraphs) return [];
+    const outputs = nodes.filter((n) => inferKind(n) === "output");
+    if (outputs.length === 0) return [];
+    const upstreamMap = new Map<string, string[]>();
+    for (const e of edges) {
+      if (!upstreamMap.has(e.dst)) upstreamMap.set(e.dst, []);
+      upstreamMap.get(e.dst)!.push(e.src);
+    }
+    // For each node: which outputs it leads to (BFS upstream from each output).
+    const reachByNode = new Map<string, Set<string>>();
+    for (const out of outputs) {
+      const seen = new Set<string>([out]);
+      const stack = [out];
+      while (stack.length) {
+        const n = stack.pop()!;
+        for (const up of upstreamMap.get(n) ?? []) {
+          if (seen.has(up)) continue;
+          seen.add(up);
+          stack.push(up);
+        }
+      }
+      for (const n of seen) {
+        if (!reachByNode.has(n)) reachByNode.set(n, new Set());
+        reachByNode.get(n)!.add(out);
+      }
+    }
+    // Build groups: a node is exclusive to chain X if reachByNode(n) === {X}.
+    const groups: { output: string; label: string; nodes: string[] }[] = [];
+    for (const out of outputs) {
+      const exclusive = nodes.filter((n) =>
+        reachByNode.get(n)?.size === 1 && reachByNode.get(n)?.has(out),
+      );
+      if (exclusive.length < 2) continue; // skip trivial
+      const label = out.replace(/^OUTPUTS\./, "").toLowerCase().replace(/_/g, " ");
+      groups.push({ output: out, label: `${label} chain`, nodes: exclusive });
+    }
+    return groups;
+  }, [nodes, edges, showSubgraphs]);
 
   if (!lineage) {
     return (
@@ -439,6 +494,28 @@ export function LineageView({
           })}
         </div>
 
+        <div className="eyebrow" style={{ marginTop: 28 }}>Display</div>
+        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "var(--ink-2)", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={showEdgeLabels}
+              onChange={() => setShowEdgeLabels((v) => !v)}
+              style={{ accentColor: "var(--brand-emerald)" }}
+            />
+            Edge labels
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "var(--ink-2)", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={showSubgraphs}
+              onChange={() => setShowSubgraphs((v) => !v)}
+              style={{ accentColor: "var(--brand-emerald)" }}
+            />
+            Chain groupings
+          </label>
+        </div>
+
         <div className="eyebrow" style={{ marginTop: 28 }}>Stats</div>
         <dl style={{ margin: "12px 0 0", padding: 0 }}>
           <StatRow k="Edges" v={edges.length} />
@@ -515,6 +592,8 @@ export function LineageView({
             matches={matches}
             layerOk={layerOk}
             onSelect={(id) => setSelected((s) => (s === id ? null : id))}
+            showEdgeLabels={showEdgeLabels}
+            subgraphs={subgraphs}
           />
         </div>
       </div>
@@ -743,7 +822,7 @@ interface GraphSVGProps {
   W: number;
   H: number;
   nodes: string[];
-  edges: { src: string; dst: string }[];
+  edges: { src: string; dst: string; operation: string }[];
   pos: Record<string, { x: number; y: number; col: number }>;
   inferKind: (id: string) => NodeKind;
   selected: string | null;
@@ -751,11 +830,37 @@ interface GraphSVGProps {
   matches: (id: string) => boolean;
   layerOk: (id: string) => boolean;
   onSelect: (id: string) => void;
+  showEdgeLabels: boolean;
+  subgraphs: { output: string; label: string; nodes: string[] }[];
 }
 
 function GraphSVG({
   svgRef, W, H, nodes, edges, pos, inferKind, selected, focusSet, matches, layerOk, onSelect,
+  showEdgeLabels, subgraphs,
 }: GraphSVGProps) {
+  // Compute bounding box per subgraph (with padding) so we can render the
+  // chain banner behind the affected nodes.
+  const subgraphBoxes = subgraphs.map((g) => {
+    const ps = g.nodes.map((n) => pos[n]).filter(Boolean) as { x: number; y: number }[];
+    if (ps.length === 0) return null;
+    const xs = ps.map((p) => p.x);
+    const ys = ps.map((p) => p.y);
+    const padX = 105, padY = 28;
+    const x = Math.min(...xs) - padX;
+    const y = Math.min(...ys) - padY;
+    const w = Math.max(...xs) - Math.min(...xs) + padX * 2;
+    const h = Math.max(...ys) - Math.min(...ys) + padY * 2;
+    return { ...g, x, y, w, h };
+  }).filter(Boolean) as { output: string; label: string; nodes: string[]; x: number; y: number; w: number; h: number }[];
+
+  // Operation → short edge label. Keep extract/load blank to reduce clutter.
+  const labelFor = (op: string): string => {
+    if (!op) return "";
+    if (op === "extract" || op === "load" || op === "VIEW" || op === "pipeline") return "";
+    if (op === "fk") return "FK";
+    return op;
+  };
+
   return (
     <svg
       ref={svgRef}
@@ -777,6 +882,37 @@ function GraphSVG({
         </marker>
       </defs>
       <rect width={W} height={H} fill="url(#dotgrid)" opacity="0.5" />
+
+      {/* Subgraph banners — drawn behind everything so edges/nodes sit on top */}
+      {subgraphBoxes.map((box, i) => (
+        <g key={`sg-${i}`} style={{ pointerEvents: "none" }}>
+          <rect
+            x={box.x}
+            y={box.y}
+            width={box.w}
+            height={box.h}
+            rx={14}
+            fill="#FFFFFF"
+            stroke="#D4D1C7"
+            strokeWidth={1.25}
+            strokeDasharray="6 4"
+            opacity={0.75}
+          />
+          <text
+            x={box.x + 14}
+            y={box.y + 18}
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              fill: "var(--ink-3)",
+            }}
+          >
+            {box.label}
+          </text>
+        </g>
+      ))}
 
       {/* Edges — orthogonal H-V-H with rounded line-joins and arrow heads */}
       {edges.map((e, i) => {
@@ -807,19 +943,47 @@ function GraphSVG({
             `L${x2},${y2}`
           );
         }
+        const lbl = showEdgeLabels && !dim ? labelFor(e.operation) : "";
         return (
-          <path
-            key={i}
-            d={d}
-            fill="none"
-            stroke={dim ? "var(--line)" : "#6B7884"}
-            strokeOpacity={dim ? 0.3 : 0.7}
-            strokeWidth={1.25}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            markerEnd={dim ? "url(#arrow-dim)" : "url(#arrow)"}
-            style={{ transition: "opacity .2s, stroke .2s" }}
-          />
+          <g key={i}>
+            <path
+              d={d}
+              fill="none"
+              stroke={dim ? "var(--line)" : "#6B7884"}
+              strokeOpacity={dim ? 0.3 : 0.7}
+              strokeWidth={1.25}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              markerEnd={dim ? "url(#arrow-dim)" : "url(#arrow)"}
+              style={{ transition: "opacity .2s, stroke .2s" }}
+            />
+            {lbl && (
+              <g transform={`translate(${midX}, ${(y1 + y2) / 2})`}>
+                <rect
+                  x={-(lbl.length * 3.4 + 6)}
+                  y={-7}
+                  width={lbl.length * 6.8 + 12}
+                  height={14}
+                  rx={3}
+                  fill="#FFFFFF"
+                  stroke="var(--line)"
+                  strokeWidth={0.75}
+                />
+                <text
+                  textAnchor="middle"
+                  y={4}
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 9.5,
+                    fill: "var(--ink-3)",
+                    letterSpacing: "0.04em",
+                  }}
+                >
+                  {lbl}
+                </text>
+              </g>
+            )}
+          </g>
         );
       })}
 
