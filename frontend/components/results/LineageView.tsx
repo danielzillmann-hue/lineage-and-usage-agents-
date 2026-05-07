@@ -4,19 +4,36 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, Maximize2, Minimize2, Image as ImageIcon, FileSpreadsheet, X, Filter } from "lucide-react";
 import type { Inventory, Layer, LineageEdge, LineageGraph, Sensitivity } from "@/lib/types";
 
-const LAYER_COLORS: Record<Layer, { fill: string; stroke: string; text: string; dot: string }> = {
-  raw:         { fill: "var(--bg-elev)",       stroke: "var(--ink-3)",          text: "var(--ink-2)",          dot: "var(--ink-3)" },
-  staging:     { fill: "var(--bg-elev)",       stroke: "var(--ink-3)",          text: "var(--ink-2)",          dot: "var(--ink-3)" },
-  integration: { fill: "var(--brand-emerald-100)", stroke: "var(--brand-emerald)", text: "var(--brand-emerald-700)", dot: "var(--brand-emerald)" },
-  reporting:   { fill: "var(--brand-ink)",     stroke: "var(--brand-ink)",      text: "#FFFFFF",               dot: "var(--brand-ink)" },
-  output:      { fill: "var(--brand-ink)",     stroke: "var(--brand-ink)",      text: "#FFFFFF",               dot: "var(--brand-ink)" },
-  unknown:     { fill: "var(--bg-sunk)",       stroke: "var(--line-strong)",    text: "var(--ink-3)",          dot: "var(--line-strong)" },
+// Visual taxonomy — palette per node "kind" mirroring the user's Mermaid handoff.
+//   raw      → blue   (source tables, the system of record)
+//   staging  → orange (stg_* tables — pre-conformance)
+//   core     → green  (integration / dimensional / fact tables)
+//   pipeline → dark   (XML pipeline nodes — first-class)
+//   output   → pink   (CSV / file outputs)
+//   external → purple (CSVs flowing IN that aren't from the DB)
+//   unknown  → grey
+type NodeKind = "raw" | "staging" | "core" | "pipeline" | "output" | "external" | "unknown";
+
+const KIND_STYLES: Record<NodeKind, { fill: string; stroke: string; text: string; dot: string }> = {
+  raw:      { fill: "#E1F5FE", stroke: "#0288D1", text: "#01579B", dot: "#0288D1" },
+  staging:  { fill: "#FFF3E0", stroke: "#F57C00", text: "#E65100", dot: "#F57C00" },
+  core:     { fill: "#E8F5E9", stroke: "#388E3C", text: "#1B5E20", dot: "#388E3C" },
+  pipeline: { fill: "#1F1F1F", stroke: "#1F1F1F", text: "#FFFFFF", dot: "#1F1F1F" },
+  output:   { fill: "#FCE4EC", stroke: "#C2185B", text: "#880E4F", dot: "#C2185B" },
+  external: { fill: "#EDE7F6", stroke: "#512DA8", text: "#311B92", dot: "#512DA8" },
+  unknown:  { fill: "var(--bg-sunk)", stroke: "var(--line-strong)", text: "var(--ink-3)", dot: "var(--line-strong)" },
 };
 
-const COLUMNS: Layer[] = ["raw", "staging", "integration", "reporting"];
-const COL_LABELS: Record<Layer, string> = {
-  raw: "RAW", staging: "STAGING", integration: "INTEGRATION", reporting: "REPORTING",
-  output: "OUTPUTS", unknown: "UNKNOWN",
+const KIND_LABEL: Record<NodeKind, string> = {
+  raw: "Raw", staging: "Staging", core: "Core / Integration",
+  pipeline: "Pipeline", output: "Output", external: "External", unknown: "Unknown",
+};
+
+// Layer (from inventory) → NodeKind. Helps the renderer show the same colours
+// users see in the inventory grid.
+const LAYER_TO_KIND: Record<Layer, NodeKind> = {
+  raw: "raw", staging: "staging", integration: "core",
+  reporting: "core", output: "output", unknown: "unknown",
 };
 
 export function LineageView({
@@ -56,6 +73,17 @@ export function LineageView({
       return "unknown";
     };
   }, [inventory]);
+
+  // Render-side classifier: pipelines are first-class; otherwise map layer → kind.
+  const inferKind = (fqn: string): NodeKind => {
+    if (fqn.startsWith("PIPELINE.")) return "pipeline";
+    if (fqn.startsWith("OUTPUTS.")) return "output";
+    const upper = fqn.toUpperCase();
+    const last = upper.split(".").pop() ?? "";
+    if (last.startsWith("STG_") || last.startsWith("STAGE_")) return "staging";
+    if (last.startsWith("CORE_")) return "core";
+    return LAYER_TO_KIND[inferLayer(fqn)] ?? "unknown";
+  };
 
   // Column-level sensitivity lookup for CSV export and PII path detection
   const sensByCol = useMemo(() => {
@@ -146,35 +174,83 @@ export function LineageView({
     };
   }, [lineage, pipelineFilterSet]);
 
-  // Group nodes by column (layer) and assign positions
+  // Topological depth layout — every node's column = its longest path from a
+  // root. Lets chains of arbitrary length flow LR without being squashed into
+  // 4 fixed columns; pipelines naturally sit between their inputs and outputs.
   const layout = useMemo(() => {
-    const W = 1200, H = 720;
-    const colXs: number[] = [120, 460, 800, 1080];
-    const usedLayers: Layer[] = COLUMNS.filter((l) =>
-      nodes.some((n) => normalizeLayer(inferLayer(n)) === l),
-    );
-    const colXMap: Record<string, number> = {};
-    usedLayers.forEach((l, i) => {
-      const denom = Math.max(usedLayers.length - 1, 1);
-      colXMap[l] = 120 + (i * (W - 240)) / denom;
-    });
-
-    const byLayer: Record<string, string[]> = {};
-    for (const n of nodes) {
-      const l = normalizeLayer(inferLayer(n));
-      (byLayer[l] ??= []).push(n);
+    const W = 1400;
+    const adj = new Map<string, string[]>();   // node → downstream
+    const rev = new Map<string, string[]>();   // node → upstream
+    for (const e of edges) {
+      if (!adj.has(e.src)) adj.set(e.src, []);
+      adj.get(e.src)!.push(e.dst);
+      if (!rev.has(e.dst)) rev.set(e.dst, []);
+      rev.get(e.dst)!.push(e.src);
     }
-    for (const l of Object.keys(byLayer)) byLayer[l].sort();
 
-    const pos: Record<string, { x: number; y: number; layer: Layer }> = {};
-    for (const [l, ns] of Object.entries(byLayer)) {
-      const spacing = (H - 100) / Math.max(ns.length, 1);
-      ns.forEach((n, i) => {
-        pos[n] = { x: colXMap[l] ?? 120, y: 80 + i * spacing, layer: l as Layer };
+    // Compute depth per node (longest path from any root). Memoised; cycle-safe.
+    const depthCache: Record<string, number> = {};
+    const visiting = new Set<string>();
+    const depth = (n: string): number => {
+      if (n in depthCache) return depthCache[n];
+      if (visiting.has(n)) return 0; // cycle break
+      visiting.add(n);
+      const parents = rev.get(n) ?? [];
+      let d = 0;
+      if (parents.length === 0) d = 0;
+      else d = 1 + Math.max(...parents.map((p) => depth(p)));
+      visiting.delete(n);
+      depthCache[n] = d;
+      return d;
+    };
+    nodes.forEach((n) => depth(n));
+
+    const byCol: Record<number, string[]> = {};
+    for (const n of nodes) {
+      const c = depthCache[n] ?? 0;
+      (byCol[c] ??= []).push(n);
+    }
+    // Stable sort within column: kind first (raw → staging → core → output),
+    // then alphabetical, so layouts feel predictable.
+    const kindOrder: Record<NodeKind, number> = {
+      external: 0, raw: 1, staging: 2, pipeline: 3, core: 4, output: 5, unknown: 6,
+    };
+    for (const c of Object.keys(byCol)) {
+      byCol[Number(c)].sort((a, b) => {
+        const ka = kindOrder[inferKind(a)];
+        const kb = kindOrder[inferKind(b)];
+        if (ka !== kb) return ka - kb;
+        return a.localeCompare(b);
       });
     }
-    return { W, H, pos, colXs, usedLayers, colXMap };
-  }, [nodes, inferLayer]);
+
+    const cols = Object.keys(byCol).map(Number).sort((a, b) => a - b);
+    const colCount = cols.length || 1;
+    const COL_PAD_LEFT = 110;
+    const COL_PAD_RIGHT = 110;
+    const usableW = W - COL_PAD_LEFT - COL_PAD_RIGHT;
+    const colXs: number[] = cols.map((c, i) =>
+      colCount === 1 ? W / 2 : COL_PAD_LEFT + (i * usableW) / (colCount - 1),
+    );
+
+    // Vertical spacing: at least 60px between nodes; canvas height adapts to the tallest column.
+    const ROW_H = 60;
+    const TOP_PAD = 64;
+    const tallest = Math.max(...cols.map((c) => byCol[c].length), 1);
+    const H = Math.max(560, TOP_PAD + 40 + tallest * ROW_H);
+
+    const pos: Record<string, { x: number; y: number; col: number }> = {};
+    cols.forEach((c, i) => {
+      const ns = byCol[c];
+      const colHeight = (ns.length - 1) * ROW_H;
+      const startY = TOP_PAD + (H - TOP_PAD * 2 - colHeight) / 2;
+      ns.forEach((n, j) => {
+        pos[n] = { x: colXs[i], y: startY + j * ROW_H, col: c };
+      });
+    });
+
+    return { W, H, pos, colXs, cols };
+  }, [nodes, edges]);
 
   // Filter logic
   const matches = (id: string) => !search || id.toLowerCase().includes(search.toLowerCase());
@@ -315,31 +391,52 @@ export function LineageView({
           </>
         )}
 
-        <div className="eyebrow" style={{ marginTop: 28 }}>Layers</div>
+        <div className="eyebrow" style={{ marginTop: 28 }}>Node types</div>
         <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-          {(["raw", "staging", "integration", "reporting", "unknown"] as Layer[]).map((id) => (
-            <label
-              key={id}
-              style={{
-                display: "flex", alignItems: "center", gap: 10,
-                fontSize: 13, color: "var(--ink-2)", cursor: "pointer",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={layers[id]}
-                onChange={() => setLayers((l) => ({ ...l, [id]: !l[id] }))}
-                style={{ accentColor: "var(--brand-emerald)" }}
-              />
-              <span
+          {(["raw", "staging", "core", "pipeline", "output", "external", "unknown"] as NodeKind[]).map((kind) => {
+            // Map kind back to one or more Layer ids for the existing layer-toggle state.
+            // staging/core/pipeline/output/external all gate on layer presence; we keep the
+            // simpler: toggling these hides nodes of that kind from the canvas.
+            const ids: Layer[] = (
+              kind === "raw" ? ["raw"] :
+              kind === "staging" ? ["staging"] :
+              kind === "core" ? ["integration", "reporting"] :
+              kind === "output" ? ["output"] :
+              kind === "pipeline" ? ["integration"] :
+              kind === "external" ? ["unknown"] :
+              ["unknown"]
+            );
+            const checked = ids.every((i) => layers[i] !== false);
+            return (
+              <label
+                key={kind}
                 style={{
-                  width: 8, height: 8, borderRadius: 99,
-                  background: LAYER_COLORS[id].dot, flexShrink: 0,
+                  display: "flex", alignItems: "center", gap: 10,
+                  fontSize: 13, color: "var(--ink-2)", cursor: "pointer",
                 }}
-              />
-              {id.charAt(0).toUpperCase() + id.slice(1)}
-            </label>
-          ))}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => setLayers((l) => {
+                    const next = { ...l };
+                    for (const i of ids) next[i] = !checked;
+                    return next;
+                  })}
+                  style={{ accentColor: KIND_STYLES[kind].stroke }}
+                />
+                <span
+                  style={{
+                    width: 10, height: 10, borderRadius: kind === "pipeline" ? 5 : 2,
+                    background: KIND_STYLES[kind].fill,
+                    border: `1px solid ${KIND_STYLES[kind].stroke}`,
+                    flexShrink: 0,
+                  }}
+                />
+                {KIND_LABEL[kind]}
+              </label>
+            );
+          })}
         </div>
 
         <div className="eyebrow" style={{ marginTop: 28 }}>Stats</div>
@@ -412,9 +509,7 @@ export function LineageView({
             nodes={nodes}
             edges={edges}
             pos={layout.pos}
-            colXs={Object.values(layout.colXMap)}
-            colLabels={layout.usedLayers.map((l) => COL_LABELS[l])}
-            inferLayer={(n) => normalizeLayer(inferLayer(n))}
+            inferKind={inferKind}
             selected={selected}
             focusSet={focusSet}
             matches={matches}
@@ -428,7 +523,7 @@ export function LineageView({
       <aside style={{ background: "var(--bg-elev)", padding: 24, overflowY: "auto" }}>
         {sel ? (
           <>
-            <div className="eyebrow">{COL_LABELS[sel.layer] ?? sel.layer.toUpperCase()}</div>
+            <div className="eyebrow">{KIND_LABEL[inferKind(sel.id)]}</div>
             <h3
               className="mono"
               style={{ fontSize: 15, fontWeight: 500, margin: "8px 0 4px", color: "var(--ink)", wordBreak: "break-all" }}
@@ -649,10 +744,8 @@ interface GraphSVGProps {
   H: number;
   nodes: string[];
   edges: { src: string; dst: string }[];
-  pos: Record<string, { x: number; y: number; layer: Layer }>;
-  colXs: number[];
-  colLabels: string[];
-  inferLayer: (id: string) => Layer;
+  pos: Record<string, { x: number; y: number; col: number }>;
+  inferKind: (id: string) => NodeKind;
   selected: string | null;
   focusSet: Set<string> | null;
   matches: (id: string) => boolean;
@@ -661,7 +754,7 @@ interface GraphSVGProps {
 }
 
 function GraphSVG({
-  svgRef, W, H, nodes, edges, pos, colXs, colLabels, inferLayer, selected, focusSet, matches, layerOk, onSelect,
+  svgRef, W, H, nodes, edges, pos, inferKind, selected, focusSet, matches, layerOk, onSelect,
 }: GraphSVGProps) {
   return (
     <svg
@@ -676,24 +769,6 @@ function GraphSVG({
         </pattern>
       </defs>
       <rect width={W} height={H} fill="url(#dotgrid)" opacity="0.5" />
-
-      {/* Column labels */}
-      {colLabels.map((label, i) => (
-        <text
-          key={label}
-          x={colXs[i]}
-          y={32}
-          textAnchor="middle"
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 10.5,
-            letterSpacing: "0.12em",
-            fill: "var(--ink-3)",
-          }}
-        >
-          {label}
-        </text>
-      ))}
 
       {/* Edges */}
       {edges.map((e, i) => {
@@ -721,36 +796,48 @@ function GraphSVG({
       {nodes.map((id) => {
         const p = pos[id];
         if (!p) return null;
-        const layer = inferLayer(id);
-        const c = LAYER_COLORS[layer];
+        const kind = inferKind(id);
+        const c = KIND_STYLES[kind];
         const isMatch = matches(id);
         const isFocused = !selected || focusSet?.has(id);
         const dim = !isMatch || !isFocused || !layerOk(id);
         const isSel = selected === id;
-        const label = id.split(".").slice(-2).join(".");
+        // Pipeline labels use the bare pipeline name; tables show schema.name minus prefixes.
+        let label: string;
+        if (kind === "pipeline") {
+          label = id.replace(/^PIPELINE\./, "");
+        } else if (id.startsWith("OUTPUTS.") || id.startsWith("SOURCE.")) {
+          label = id.split(".").slice(1).join(".");
+        } else {
+          label = id.split(".").slice(-2).join(".");
+        }
+        // Pipeline nodes get rounder corners + slightly taller; emphasises shape.
+        const rectW = kind === "pipeline" ? 175 : 160;
+        const rectH = 28;
+        const rx = kind === "pipeline" ? 14 : 4;
         return (
           <g
             key={id}
-            style={{ cursor: "pointer", opacity: dim ? 0.25 : 1, transition: "opacity .2s" }}
+            style={{ cursor: "pointer", opacity: dim ? 0.18 : 1, transition: "opacity .2s" }}
             onClick={() => onSelect(id)}
           >
             <rect
-              x={p.x - 80}
-              y={p.y - 14}
-              width={160}
-              height={28}
-              rx={4}
+              x={p.x - rectW / 2}
+              y={p.y - rectH / 2}
+              width={rectW}
+              height={rectH}
+              rx={rx}
               fill={c.fill}
-              stroke={isSel ? "var(--brand-emerald)" : c.stroke}
-              strokeWidth={isSel ? 1.5 : 1}
+              stroke={isSel ? "#0FB37A" : c.stroke}
+              strokeWidth={isSel ? 2 : 1.5}
             />
             <text
               x={p.x}
               y={p.y + 4}
               textAnchor="middle"
-              style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fill: c.text }}
+              style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fill: c.text, fontWeight: kind === "pipeline" ? 500 : 400 }}
             >
-              {label.length > 22 ? label.slice(0, 21) + "…" : label}
+              {label.length > 24 ? label.slice(0, 23) + "…" : label}
             </text>
           </g>
         );
