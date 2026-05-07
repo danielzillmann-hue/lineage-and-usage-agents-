@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     demo_etl_bucket: str = Field(default="dan-sandpit-lineage-demo")
     demo_etl_prefix: str = Field(default="extracts/super-fund/etl/")
     demo_outputs_prefix: str = Field(default="extracts/super-fund/outputs/")
+    demo_documents_prefix: str = Field(default="documents/")
 
 
 @lru_cache

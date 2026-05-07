@@ -170,6 +170,25 @@ class BusinessRule(BaseModel):
     confidence: float = 0.8
 
 
+class DeliverySpec(BaseModel):
+    """A documented delivery destination for an output CSV.
+
+    Extracted from delivery-specification documents (PDFs / Markdown) found
+    alongside the pipeline outputs. Lets us cross-check which CSVs ship
+    somewhere the org has formally specified vs which run "off-spec".
+    """
+    csv_name: str
+    kind: str = "internal"   # internal / external / unknown
+    destination: str | None = None
+    protocol: str | None = None       # SFTP / REST / SMTP / etc.
+    endpoint: str | None = None       # full URL or SFTP path
+    auth: str | None = None
+    frequency: str | None = None
+    details: str | None = None
+    source_doc: str | None = None     # filename of the spec
+    confidence: float = 0.9
+
+
 class MultiWriterTarget(BaseModel):
     """A target table written by more than one pipeline.
 
@@ -194,6 +213,8 @@ class Inventory(BaseModel):
     sequencing: list[MigrationWave] = Field(default_factory=list)
     rules: list[BusinessRule] = Field(default_factory=list)
     multi_writers: list[MultiWriterTarget] = Field(default_factory=list)
+    deliveries: list[DeliverySpec] = Field(default_factory=list)
+    undocumented_outputs: list[str] = Field(default_factory=list)
 
 
 class LineageEdge(BaseModel):

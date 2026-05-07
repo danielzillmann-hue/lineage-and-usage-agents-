@@ -23,6 +23,20 @@ export interface DemoDefaults {
   bucket: string;
   prefix: string;
   outputs_prefix: string;
+  documents_prefix: string;
+}
+
+export interface DeliverySpec {
+  csv_name: string;
+  kind: "internal" | "external" | "unknown" | string;
+  destination?: string | null;
+  protocol?: string | null;
+  endpoint?: string | null;
+  auth?: string | null;
+  frequency?: string | null;
+  details?: string | null;
+  source_doc?: string | null;
+  confidence: number;
 }
 
 export interface TestConnectionResponse {
@@ -72,6 +86,7 @@ export interface RunRequest {
   bucket?: string;
   prefix?: string;
   outputs_prefix?: string;
+  documents_prefix?: string;
   agents?: AgentName[];
   label?: string;
 }
@@ -214,6 +229,8 @@ export interface Inventory {
   sequencing: MigrationWave[];
   rules: BusinessRule[];
   multi_writers: MultiWriterTarget[];
+  deliveries?: DeliverySpec[];
+  undocumented_outputs?: string[];
 }
 
 export interface LineageEdge {

@@ -34,6 +34,10 @@ async def create_run(req: RunRequest) -> Run:
     # bucket has CSVs at the root, ETL XMLs under pipelines/, so we scan both.
     if req.bucket and req.outputs_prefix is None:
         req.outputs_prefix = ""
+    # Auto-fill documents_prefix from the demo default when missing.
+    if req.bucket and req.documents_prefix is None:
+        from app.config import get_settings as _gs
+        req.documents_prefix = _gs().demo_documents_prefix
     run = Run(
         id=str(uuid.uuid4()),
         bucket=req.bucket,

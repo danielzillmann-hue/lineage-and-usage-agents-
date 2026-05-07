@@ -30,6 +30,7 @@ class DemoDefaults(BaseModel):
     bucket: str
     prefix: str
     outputs_prefix: str
+    documents_prefix: str
 
 
 class TestConnectionResponse(BaseModel):
@@ -56,6 +57,7 @@ def demo_defaults() -> DemoDefaults:
         bucket=s.demo_etl_bucket,
         prefix=s.demo_etl_prefix,
         outputs_prefix=s.demo_outputs_prefix,
+        documents_prefix=s.demo_documents_prefix,
     )
 
 

@@ -36,6 +36,7 @@ class RunRequest(BaseModel):
     bucket: str | None = None
     prefix: str = ""
     outputs_prefix: str | None = None  # if None, no separate outputs scan
+    documents_prefix: str | None = None  # delivery specs for cross-check
     agents: list[AgentName] = Field(default_factory=lambda: list(AgentName))
     label: str | None = None
 

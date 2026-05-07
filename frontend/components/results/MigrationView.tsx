@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Download, ShieldAlert, AlertTriangle, CheckCircle2, GitMerge, FileText } from "lucide-react";
+import { Download, ShieldAlert, AlertTriangle, CheckCircle2, GitMerge, FileText, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import type { DecommissionAssessment, Inventory, MultiWriterTarget } from "@/lib/types";
+import type { DecommissionAssessment, DeliverySpec, Inventory, MultiWriterTarget } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8080";
 
@@ -188,6 +188,56 @@ export function MigrationView({ inventory, runId }: { inventory?: Inventory; run
         </Card>
       )}
 
+      {/* ─── Delivery specs cross-check ──────────────────────────── */}
+      {((inventory.deliveries?.length ?? 0) > 0 || (inventory.undocumented_outputs?.length ?? 0) > 0) && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <CardTitle>Delivery specifications</CardTitle>
+                <CardDescription>
+                  CSV outputs cross-checked against the documented Internal / External Delivery Specs.
+                </CardDescription>
+              </div>
+              <div className="flex gap-2">
+                <Badge variant="ok"><CheckCircle2 className="h-3 w-3" strokeWidth={1.5} /> {inventory.deliveries?.length ?? 0} documented</Badge>
+                {(inventory.undocumented_outputs?.length ?? 0) > 0 && (
+                  <Badge variant="crit"><AlertCircle className="h-3 w-3" strokeWidth={1.5} /> {inventory.undocumented_outputs!.length} undocumented</Badge>
+                )}
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12.5px]">
+                <thead>
+                  <tr style={{ borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" }}>
+                    <th className="text-left px-5 py-2" style={hdrStyle}>CSV</th>
+                    <th className="text-left px-3 py-2" style={hdrStyle}>Kind</th>
+                    <th className="text-left px-3 py-2" style={hdrStyle}>Destination</th>
+                    <th className="text-left px-3 py-2" style={hdrStyle}>Protocol</th>
+                    <th className="text-left px-3 py-2" style={hdrStyle}>Endpoint / Inbox</th>
+                    <th className="text-left px-3 py-2" style={hdrStyle}>Frequency</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(inventory.deliveries ?? []).map((d) => <DeliveryRow key={`${d.csv_name}-${d.source_doc ?? ""}`} d={d} />)}
+                  {(inventory.undocumented_outputs ?? []).map((csv) => (
+                    <tr key={csv} style={{ borderBottom: "1px solid var(--line)", background: "rgba(192,54,44,0.05)" }}>
+                      <td className="px-5 py-2.5 mono" style={{ color: "var(--crit)" }}>{csv}</td>
+                      <td className="px-3 py-2.5"><Badge variant="crit">undocumented</Badge></td>
+                      <td colSpan={4} className="px-3 py-2.5" style={{ color: "var(--ink-3)", fontStyle: "italic" }}>
+                        produced by ETL but no delivery specification found — destination unknown
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* ─── Embedded business rules ─────────────────────────────── */}
       {(inventory.rules?.length ?? 0) > 0 && (
         <Card>
@@ -301,6 +351,22 @@ function WaveCard({ wave }: { wave: { wave: number; description: string; table_f
         )}
       </div>
     </div>
+  );
+}
+
+function DeliveryRow({ d }: { d: DeliverySpec }) {
+  const variant = d.kind === "external" ? "warn" : d.kind === "internal" ? "info" : "neutral";
+  return (
+    <tr style={{ borderBottom: "1px solid var(--line)" }}>
+      <td className="px-5 py-2.5 mono" style={{ color: "var(--ink)" }}>{d.csv_name}</td>
+      <td className="px-3 py-2.5"><Badge variant={variant}>{d.kind}</Badge></td>
+      <td className="px-3 py-2.5" style={{ color: "var(--ink-2)" }}>{d.destination ?? "—"}</td>
+      <td className="px-3 py-2.5"><Badge variant="neutral">{d.protocol ?? "—"}</Badge></td>
+      <td className="px-3 py-2.5 mono" style={{ color: "var(--ink-3)", fontSize: 11.5, wordBreak: "break-all", maxWidth: 360 }}>
+        {d.endpoint ?? "—"}
+      </td>
+      <td className="px-3 py-2.5" style={{ color: "var(--ink-3)", fontSize: 11.5 }}>{d.frequency ?? "—"}</td>
+    </tr>
   );
 }
 

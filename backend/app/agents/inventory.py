@@ -24,6 +24,7 @@ from app.models.schema import (
     PipelineRunStats, PipelineStep, Procedure, Table,
 )
 from app.agents.annotations import annotate_columns
+from app.agents.documents import cross_check_documents
 from app.agents.rules import extract_rules
 from app.parsers.etl_xml import parse_pipeline as parse_xml_pipeline
 from app.services import gcs
@@ -193,6 +194,12 @@ async def run(req: RunRequest, results, emit: EmitFn) -> None:
     except Exception as e:  # noqa: BLE001
         log.warning("rule extraction failed: %s", e)
         await log_event(emit, AgentName.INVENTORY, f"Rule extraction skipped: {e}")
+
+    try:
+        await cross_check_documents(req, inv, emit)
+    except Exception as e:  # noqa: BLE001
+        log.warning("documentation cross-check failed: %s", e)
+        await log_event(emit, AgentName.INVENTORY, f"Documentation cross-check skipped: {e}")
 
     # ─── 6. Heuristic flags ───────────────────────────────────────────
     inv.flags = _build_flags(inv)
