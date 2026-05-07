@@ -130,9 +130,10 @@ async def chat(run_id: str, body: ChatRequest) -> ChatResponse:
     )
 
     settings = get_settings()
-    # Gemini 2.5 Pro for synthesis; fall back to the run's default model.
-    model = "gemini-2.5-pro"
-    location = settings.vertex_location  # use the same region as the rest
+    # Gemini 2.5 Pro for synthesis — same model + region the summary
+    # agent uses (us-central1; Pro isn't available in australia-southeast1).
+    model = settings.summary_model
+    location = settings.summary_location
 
     client = gemini(location=location)
     cfg = types.GenerateContentConfig(
@@ -140,9 +141,17 @@ async def chat(run_id: str, body: ChatRequest) -> ChatResponse:
         max_output_tokens=4096,
         temperature=0.3,
     )
-    resp = await client.aio.models.generate_content(
-        model=model, contents=user_message, config=cfg,
-    )
+    try:
+        resp = await client.aio.models.generate_content(
+            model=model, contents=user_message, config=cfg,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.exception("chat: Gemini call failed for run %s", run_id)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Gemini call failed: {type(e).__name__}: {e}",
+        ) from e
+
     answer = (getattr(resp, "text", None) or "").strip()
     if not answer:
         answer = "(no response — try rephrasing)"
