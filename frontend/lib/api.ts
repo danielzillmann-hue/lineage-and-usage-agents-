@@ -59,6 +59,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  transformOrchestrate: (id: string) =>
+    jfetch<{ run_id: string; files_added: string[]; workflow: string }>(
+      `/api/runs/${id}/transform/orchestrate`,
+      { method: "POST" },
+    ),
   chat: (id: string, body: ChatRequest) =>
     jfetch<ChatResponse>(`/api/runs/${id}/chat`, {
       method: "POST",

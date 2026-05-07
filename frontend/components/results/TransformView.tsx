@@ -457,6 +457,30 @@ export function TransformView({ runId }: { runId: string }) {
           </button>
         </div>
 
+        {!manifest.files.some((f) => f.startsWith(".github/")) && (
+          <button
+            onClick={async () => {
+              try {
+                await api.transformOrchestrate(runId);
+                const m = await api.transformManifest(runId);
+                setManifest(m);
+              } catch (e: unknown) {
+                setError(e instanceof Error ? e.message : String(e));
+              }
+            }}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              width: "100%", justifyContent: "center",
+              marginBottom: 8, padding: "6px 12px", fontSize: 12, fontWeight: 500,
+              background: "transparent", color: "var(--ink-2)",
+              border: "1px dashed var(--line-strong)", borderRadius: 6, cursor: "pointer",
+            }}
+            title="Add a GitHub Actions workflow YAML to this project"
+          >
+            + Add orchestration (workflow YAML)
+          </button>
+        )}
+
         <button
           onClick={() => { setPushResult(null); setPushModalOpen(true); }}
           style={{
