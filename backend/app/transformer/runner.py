@@ -10,6 +10,8 @@ from dataclasses import dataclass
 
 from transformation_core import SQLGenerator, wrap_sqlx
 
+from pathlib import PurePosixPath, PureWindowsPath
+
 from app.transformer.dataform_project import (
     AssembledProject,
     DataformProjectConfig,
@@ -19,14 +21,34 @@ from app.transformer.insignia_to_ir import OperationsScript, TransformResult, pa
 from app.transformer.sql_helpers import render_dml_for_bigquery
 
 
+def _basename(path: str) -> str:
+    """Return the filename portion regardless of OS-native separator
+    (handles both backslash and forward slash so Windows-collected paths
+    don't leak into the original-source filenames written to GCS).
+    """
+    name = PurePosixPath(path).name
+    if "\\" in name:
+        name = PureWindowsPath(path).name
+    return name
+
+
 @dataclass
 class GeneratedFile:
-    """One output SQLX file."""
+    """One output SQLX file plus enough context to render it side-by-side
+    with its original source.
+    """
     path: str          # e.g. "definitions/stg_daily_metrics.sqlx"
     content: str
     pipeline: str
     kind: str          # "primary" | "operations"
     warnings: list[str]
+    # Original source for the side-by-side view:
+    #   primary    → the pipeline XML file (whole)
+    #   operations → the raw <execute_sql> body
+    original_filename: str = ""
+    original_content: str = ""
+    # 0-100 confidence score; populated by the validation pass.
+    confidence: int = 100
 
 
 def generate_sqlx(xml_files: list[tuple[str, str]]) -> list[GeneratedFile]:
@@ -60,6 +82,8 @@ def generate_sqlx(xml_files: list[tuple[str, str]]) -> list[GeneratedFile]:
                 pipeline=pipeline,
                 kind="primary",
                 warnings=list(result.warnings),
+                original_filename=_basename(filename),
+                original_content=text,
             ))
 
         # Operations (UPDATE/DELETE/MERGE post-load)
@@ -70,6 +94,8 @@ def generate_sqlx(xml_files: list[tuple[str, str]]) -> list[GeneratedFile]:
                 pipeline=pipeline,
                 kind="operations",
                 warnings=[],
+                original_filename=f"{op.name}.sql",
+                original_content=op.sql,
             ))
 
     return out

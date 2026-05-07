@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from app.config import get_settings
@@ -29,6 +29,7 @@ class TransformManifest:
     warnings: list[str]
     generated_at: str                # ISO timestamp
     validation: dict | None = None   # {ok, files_total, files_failing, errors:[...], warnings:[...]}
+    file_meta: dict[str, dict] = field(default_factory=dict)  # path → {confidence, kind, original_path, pipeline}
 
 
 def _prefix(run_id: str) -> str:
@@ -48,6 +49,10 @@ def upload_project(run_id: str, project: AssembledProject) -> TransformManifest:
         gcs.write_text(bucket, f"{prefix}/{path}", content, content_type=ct)
         log.info("uploaded %s/%s (%d bytes)", prefix, path, len(content))
 
+    # Originals (pipeline XML + execute_sql bodies) for the side-by-side view.
+    for original_path, content in project.originals.items():
+        gcs.write_text(bucket, f"{prefix}/{original_path}", content, content_type="text/plain")
+
     manifest = TransformManifest(
         run_id=run_id,
         pipelines=sorted(set(project.pipelines)),
@@ -57,6 +62,7 @@ def upload_project(run_id: str, project: AssembledProject) -> TransformManifest:
         warnings=list(project.warnings),
         generated_at=datetime.now(timezone.utc).isoformat(),
         validation=project.validation,
+        file_meta=project.file_meta,
     )
     gcs.write_json(
         bucket,
@@ -90,13 +96,18 @@ def read_file(run_id: str, path: str) -> str | None:
 
 
 def list_files(run_id: str) -> list[str]:
-    """List all generated file paths (relative to the project root)."""
+    """List all generated file paths (relative to the project root).
+
+    Excludes the manifest and the `_originals/` tree (those are surfaced
+    via separate APIs / file_meta lookups).
+    """
     settings = get_settings()
     prefix = f"{_prefix(run_id)}/"
     blobs = gcs.list_blobs(settings.results_bucket, prefix)
     out: list[str] = []
     for b in blobs:
         rel = b.removeprefix(prefix)
-        if rel and rel != "_manifest.json":
-            out.append(rel)
+        if not rel or rel == "_manifest.json" or rel.startswith("_originals/"):
+            continue
+        out.append(rel)
     return sorted(out)

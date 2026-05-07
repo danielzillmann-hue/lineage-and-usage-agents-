@@ -43,6 +43,8 @@ class AssembledProject:
     operations: list[str] = field(default_factory=list)  # post-load ops emitted
     warnings: list[str] = field(default_factory=list)
     validation: dict | None = None                       # optional validation summary
+    file_meta: dict[str, dict] = field(default_factory=dict)  # path → {confidence, original_path?, kind}
+    originals: dict[str, str] = field(default_factory=dict)   # original_path → content
 
 
 # Match `${ref('table_name')}` and `${ref("table_name")}` calls.
@@ -67,7 +69,8 @@ def assemble_project(
     views = views or {}
     out = AssembledProject()
 
-    # 1. Pass-through every generated SQLX into the project tree.
+    # 1. Pass-through every generated SQLX into the project tree, plus
+    # the matching original-source files so the UI can render side-by-side.
     for gf in generated:
         out.files[gf.path] = gf.content
         if gf.kind == "primary":
@@ -78,6 +81,20 @@ def assemble_project(
             out.pipelines.append(stem)
         elif gf.kind == "operations":
             out.operations.append(gf.path.split("/")[-1].removesuffix(".sqlx"))
+
+        # Capture the original source for later display. We dedupe by
+        # original_filename so multi-stage primaries pointing at the
+        # same XML don't store it multiple times.
+        original_path = ""
+        if gf.original_filename and gf.original_content:
+            original_path = f"_originals/{gf.original_filename}"
+            out.originals[original_path] = gf.original_content
+        out.file_meta[gf.path] = {
+            "kind": gf.kind,
+            "pipeline": gf.pipeline,
+            "confidence": gf.confidence,
+            "original_path": original_path,
+        }
 
     # 2. Compute the set of source tables — every `${ref('X')}` minus every
     # primary table the project itself produces.
@@ -97,6 +114,7 @@ def assemble_project(
     # 5. Validation pass — runs on every assembled project. The full
     # generated file list (including the just-built sources.sqlx) flows
     # through so cross-file checks like ref resolution see everything.
+    # Validation also mutates each GeneratedFile.confidence in-place.
     from app.transformer.runner import GeneratedFile  # local: avoid cycle
     from app.transformer.validation import validate_project
     full_files = list(generated)
@@ -114,6 +132,10 @@ def assemble_project(
         "errors": [_issue_dict(i) for i in validation.errors],
         "warnings": [_issue_dict(i) for i in validation.warnings],
     }
+    # Re-capture confidence per file now that validation has scored them.
+    for gf in generated:
+        if gf.path in out.file_meta:
+            out.file_meta[gf.path]["confidence"] = gf.confidence
 
     # 6. Top-level README — written last so it can include validation info.
     out.files["README.md"] = _build_readme(out, config)

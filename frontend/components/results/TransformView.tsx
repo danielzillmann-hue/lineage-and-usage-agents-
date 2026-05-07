@@ -29,13 +29,59 @@ function classifyFile(path: string): FileKind {
 }
 
 
+const paneStyle: React.CSSProperties = {
+  padding: 16,
+  background: "var(--bg-elev)",
+  border: "1px solid var(--line)",
+  borderRadius: 6,
+  fontSize: 12,
+  lineHeight: 1.55,
+  color: "var(--ink)",
+  overflow: "auto",
+  whiteSpace: "pre-wrap",
+  maxHeight: "calc(100vh - 240px)",
+};
+
+
+const CONF_COLORS: Record<"high" | "medium" | "low", { fg: string; bg: string; label: string }> = {
+  high:   { fg: "#1B5E20", bg: "#E8F5E9", label: "high" },
+  medium: { fg: "#E65100", bg: "#FFF3E0", label: "med"  },
+  low:    { fg: "#B71C1C", bg: "#FFEBEE", label: "low"  },
+};
+
+
+function ConfidenceBadge({ confidence, large = false }: { confidence: number; large?: boolean }) {
+  const bucket = confidence >= 90 ? "high" : confidence >= 70 ? "medium" : "low";
+  const c = CONF_COLORS[bucket];
+  return (
+    <span
+      className="mono"
+      title={`Confidence ${confidence}/100 — ${bucket}`}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        padding: large ? "4px 10px" : "1px 6px",
+        fontSize: large ? 11 : 9.5,
+        fontWeight: 500,
+        background: c.bg, color: c.fg,
+        borderRadius: 99,
+        flexShrink: 0,
+      }}
+    >
+      {confidence}<span style={{ opacity: 0.7, marginLeft: 2 }}>/100</span>
+    </span>
+  );
+}
+
+
 export function TransformView({ runId }: { runId: string }) {
   const [manifest, setManifest] = useState<TransformManifestResponse | null>(null);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>("");
+  const [originalContent, setOriginalContent] = useState<string>("");
   const [loadingFile, setLoadingFile] = useState(false);
+  const [splitView, setSplitView] = useState(false);
 
   // Initial manifest fetch — 404 is expected if the user hasn't generated yet.
   useEffect(() => {
@@ -53,15 +99,23 @@ export function TransformView({ runId }: { runId: string }) {
       });
   }, [runId]);
 
-  // Load selected file content
+  // Load selected file content (and the original alongside, when split view is on)
   useEffect(() => {
     if (!selectedPath) return;
     setLoadingFile(true);
+    setOriginalContent("");
     api.transformReadFile(runId, selectedPath)
       .then(setFileContent)
       .catch((e) => setFileContent(`// failed to load: ${e.message}`))
       .finally(() => setLoadingFile(false));
-  }, [runId, selectedPath]);
+
+    const meta = manifest?.file_meta?.[selectedPath];
+    if (splitView && meta?.original_path) {
+      api.transformReadOriginal(runId, meta.original_path)
+        .then(setOriginalContent)
+        .catch(() => setOriginalContent(""));
+    }
+  }, [runId, selectedPath, splitView, manifest]);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -212,6 +266,7 @@ export function TransformView({ runId }: { runId: string }) {
                   const c = KIND_STYLES[kind];
                   const leaf = path.split("/").pop();
                   const isSel = selectedPath === path;
+                  const meta = manifest.file_meta?.[path];
                   return (
                     <li key={path}>
                       <button
@@ -229,7 +284,8 @@ export function TransformView({ runId }: { runId: string }) {
                         }}
                       >
                         <FileCode2 className="h-3 w-3 flex-shrink-0" strokeWidth={1.5} />
-                        {leaf}
+                        <span style={{ flex: 1 }}>{leaf}</span>
+                        {meta && <ConfidenceBadge confidence={meta.confidence} />}
                       </button>
                     </li>
                   );
@@ -240,26 +296,66 @@ export function TransformView({ runId }: { runId: string }) {
         </div>
       </aside>
 
-      {/* Right: file content */}
+      {/* Right: file content (single or split with original on left) */}
       <main style={{ padding: "24px 32px", overflow: "auto" }}>
         {selectedPath ? (
           <>
-            <div className="eyebrow">{classifyFile(selectedPath)}</div>
-            <h3 className="mono" style={{
-              fontSize: 14, fontWeight: 500, margin: "8px 0 16px",
-              color: "var(--ink)", wordBreak: "break-all",
-            }}>
-              {selectedPath}
-            </h3>
-            <pre className="mono" style={{
-              padding: 20, background: "var(--bg-elev)",
-              border: "1px solid var(--line)", borderRadius: 6,
-              fontSize: 12.5, lineHeight: 1.6,
-              color: "var(--ink)", overflow: "auto",
-              whiteSpace: "pre-wrap",
-            }}>
-              {loadingFile ? "Loading…" : fileContent}
-            </pre>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+              <div style={{ flex: 1 }}>
+                <div className="eyebrow">{classifyFile(selectedPath)}</div>
+                <h3 className="mono" style={{
+                  fontSize: 14, fontWeight: 500, margin: "8px 0 0",
+                  color: "var(--ink)", wordBreak: "break-all",
+                }}>
+                  {selectedPath}
+                </h3>
+              </div>
+              {manifest.file_meta?.[selectedPath] && (
+                <ConfidenceBadge
+                  confidence={manifest.file_meta[selectedPath].confidence}
+                  large
+                />
+              )}
+              {/* Split view toggle — only available when an original exists */}
+              {manifest.file_meta?.[selectedPath]?.original_path && (
+                <button
+                  onClick={() => setSplitView((v) => !v)}
+                  style={{
+                    padding: "6px 12px", fontSize: 12,
+                    background: splitView ? "var(--ink)" : "var(--bg-elev)",
+                    color: splitView ? "#fff" : "var(--ink-2)",
+                    border: "1px solid var(--line)", borderRadius: 6,
+                    cursor: "pointer", fontFamily: "var(--font-sans)",
+                  }}
+                  title="Show the original Oracle source alongside the generated SQLX"
+                >
+                  {splitView ? "Split: on" : "Split view"}
+                </button>
+              )}
+            </div>
+
+            {splitView && manifest.file_meta?.[selectedPath]?.original_path ? (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <div>
+                  <div className="eyebrow" style={{ marginBottom: 6 }}>
+                    Original — {manifest.file_meta[selectedPath].original_path.split("/").pop()}
+                  </div>
+                  <pre className="mono" style={paneStyle}>
+                    {originalContent || "Loading original…"}
+                  </pre>
+                </div>
+                <div>
+                  <div className="eyebrow" style={{ marginBottom: 6 }}>Generated SQLX</div>
+                  <pre className="mono" style={paneStyle}>
+                    {loadingFile ? "Loading…" : fileContent}
+                  </pre>
+                </div>
+              </div>
+            ) : (
+              <pre className="mono" style={paneStyle}>
+                {loadingFile ? "Loading…" : fileContent}
+              </pre>
+            )}
           </>
         ) : (
           <div style={{ color: "var(--ink-3)", fontSize: 14, paddingTop: 80, textAlign: "center" }}>

@@ -46,6 +46,12 @@ export const api = {
     if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
     return r.text();
   },
+  transformReadOriginal: async (id: string, path: string): Promise<string> => {
+    const clean = path.startsWith("_originals/") ? path.slice("_originals/".length) : path;
+    const r = await fetch(`${API_BASE}/api/runs/${id}/transform/originals/${clean}`, { cache: "no-store" });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.text();
+  },
   transformDownloadUrl: (id: string) =>
     `${API_BASE}/api/runs/${id}/transform/download.zip`,
 };
@@ -76,6 +82,13 @@ export type TransformResponse = {
   validation?: ValidationSummary | null;
 };
 
+export type FileMeta = {
+  kind: "primary" | "operations" | "sources";
+  pipeline: string;
+  confidence: number;
+  original_path: string;
+};
+
 export type TransformManifestResponse = {
   run_id: string;
   pipelines: string[];
@@ -85,6 +98,7 @@ export type TransformManifestResponse = {
   warnings: string[];
   generated_at: string;
   validation?: ValidationSummary | null;
+  file_meta?: Record<string, FileMeta>;
 };
 
 export function streamRun(

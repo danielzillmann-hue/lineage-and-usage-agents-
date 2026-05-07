@@ -111,6 +111,7 @@ class TransformManifestResponse(BaseModel):
     warnings: list[str]
     generated_at: str
     validation: dict | None = None
+    file_meta: dict[str, dict] = {}
 
 
 @router.get("/{run_id}/transform", response_model=TransformManifestResponse)
@@ -141,6 +142,23 @@ def get_file(run_id: str, path: str) -> str:
     content = transform_storage.read_file(run_id, path)
     if content is None:
         raise HTTPException(404, f"file not found: {path}")
+    return content
+
+
+# ─── GET /api/runs/{run_id}/transform/originals/{path} — original source ─
+
+
+@router.get("/{run_id}/transform/originals/{path:path}", response_class=PlainTextResponse)
+def get_original(run_id: str, path: str) -> str:
+    """Read the original pipeline XML or execute_sql body that produced
+    one of the generated files. The path is the value from
+    `manifest.file_meta[<sqlx_path>].original_path`.
+    """
+    if not path.startswith("_originals/"):
+        path = f"_originals/{path}"
+    content = transform_storage.read_file(run_id, path)
+    if content is None:
+        raise HTTPException(404, f"original not found: {path}")
     return content
 
 
