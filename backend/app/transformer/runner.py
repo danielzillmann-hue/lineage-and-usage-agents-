@@ -16,6 +16,7 @@ from app.transformer.dataform_project import (
     assemble_project,
 )
 from app.transformer.insignia_to_ir import OperationsScript, TransformResult, parse
+from app.transformer.sql_helpers import render_dml_for_bigquery
 
 
 @dataclass
@@ -77,23 +78,35 @@ def generate_sqlx(xml_files: list[tuple[str, str]]) -> list[GeneratedFile]:
 def generate_project(
     xml_files: list[tuple[str, str]],
     config: DataformProjectConfig | None = None,
+    views: dict[str, str] | None = None,
 ) -> AssembledProject:
     """End-to-end: pipeline XMLs → complete Dataform project.
 
     Convenience wrapper over `generate_sqlx` + `assemble_project`. The
     returned `AssembledProject.files` is a flat dict[path -> content]
     ready to write to disk, upload to GCS, or zip.
+
+    `views` is an optional dict of `{lowercase_view_name: oracle_view_sql}`
+    plumbed through to assemble_project so source declarations for known
+    views are upgraded to `type: "view"` with the original SQL body.
     """
     files = generate_sqlx(xml_files)
-    return assemble_project(files, config)
+    return assemble_project(files, config, views=views)
 
 
 def _wrap_operations(op: OperationsScript) -> str:
-    """Wrap a DML operation in a Dataform `type: "operations"` SQLX shell."""
+    """Wrap a DML operation in a Dataform `type: "operations"` SQLX shell.
+
+    The original Oracle SQL is dialect-translated to BigQuery (SYSDATE →
+    CURRENT_DATETIME, etc.) and bare table references are rewritten to
+    `${ref('table')}` so Dataform resolves them to the project's declared
+    sources.
+    """
     depends = (
         f'  dependencies: ["{op.depends_on}"],\n'
         if op.depends_on else ""
     )
+    bq_sql = render_dml_for_bigquery(op.sql)
     return (
         f"-- Operation: {op.name}\n"
         f"-- {op.sql_kind.upper()} on {op.target_table}, generated from execute_sql step.\n\n"
@@ -103,5 +116,5 @@ def _wrap_operations(op: OperationsScript) -> str:
         f"  hasOutput: false,\n"
         f"  description: \"{op.sql_kind.lower()} statement against {op.target_table}\",\n"
         f"}}\n\n"
-        f"{op.sql.rstrip(';')};\n"
+        f"{bq_sql};\n"
     )

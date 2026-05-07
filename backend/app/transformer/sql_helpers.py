@@ -201,26 +201,37 @@ def _projection_to_columndef(proj: exp.Expression) -> ColumnDef:
 def _wrap_tables_with_ref(rendered_sql: str, tree: exp.Expression) -> str:
     """Rewrite bare table identifiers in `rendered_sql` to Dataform
     `${ref('table')}` template calls. Walks the tree to collect the table
-    names actually referenced and replaces each one once via a literal
-    swap on the rendered output.
+    names actually referenced and replaces each at every position SQL
+    can mention a table — SELECT FROM, JOINs, UPDATE/DELETE/INSERT/MERGE
+    targets, and TRUNCATE.
     """
+    import re
     table_names: list[str] = []
     for tbl in tree.find_all(exp.Table):
         if tbl.name and tbl.name not in table_names:
             table_names.append(tbl.name)
+    # The clauses where a bare table name can appear. UPDATE has the
+    # target right after the keyword; the rest take "INTO <name>" /
+    # "TABLE <name>" / "FROM <name>" forms.
+    clause_keywords = [
+        r"FROM",
+        r"JOIN",
+        r"UPDATE",
+        r"DELETE\s+FROM",
+        r"INSERT\s+INTO",
+        r"MERGE\s+INTO",
+        r"TRUNCATE\s+TABLE",
+    ]
     out = rendered_sql
     for name in table_names:
-        # Match bare backticked or unquoted table identifier with word
-        # boundaries; avoid matching column refs like `accounts.id`.
-        import re
-        # Replace `name` (BigQuery backticked) and bare `name` when
-        # preceded by FROM/JOIN keyword.
         out = re.sub(rf"`{re.escape(name)}`", f"${{ref('{name}')}}", out)
-        out = re.sub(
-            rf"(?i)(FROM|JOIN)\s+{re.escape(name)}\b",
-            lambda m: f"{m.group(1)} ${{ref('{name}')}}",
-            out,
-        )
+        for kw in clause_keywords:
+            pattern = rf"(?i)(\b{kw})\s+{re.escape(name)}\b"
+            out = re.sub(
+                pattern,
+                lambda m, n=name: f"{m.group(1)} ${{ref('{n}')}}",
+                out,
+            )
     return out
 
 
@@ -331,31 +342,27 @@ def classify_dml(sql: str) -> str:
     return "unknown"
 
 
-def render_dml_for_bigquery(sql: str, target_alias: dict[str, str] | None = None) -> str:
-    """Translate Oracle DML (UPDATE/DELETE/MERGE) to BigQuery-friendly SQL.
+def render_dml_for_bigquery(sql: str) -> str:
+    """Translate Oracle DML (UPDATE/DELETE/MERGE) to BigQuery-compatible SQL.
 
-    For now: pass through with only minor adjustments. Real translation
-    (oracle dialects → bigquery dialects via sqlglot transpile) will come
-    when we hit cases that don't round-trip cleanly.
+    Two passes:
+    1. sqlglot transpile from `oracle` → `bigquery` to convert dialect
+       differences (SYSDATE → CURRENT_DATETIME, NVL → IFNULL, etc.)
+    2. `_wrap_tables_with_ref` to rewrite every bare table identifier to
+       `${ref('table')}` so Dataform resolves them to the project's
+       declared sources.
 
-    `target_alias` lets callers rewrite a bare table reference into a
-    Dataform `${ref('...')}` template.
+    Falls back to the original SQL if transpile fails.
     """
-    target_alias = target_alias or {}
-    try:
-        tree = sqlglot.parse_one(sql, dialect="oracle")
-    except Exception:
+    if not sql or not sql.strip():
         return sql
 
-    # Apply ${ref()} rewrites to all Table references.
-    for tbl in tree.find_all(exp.Table):
-        name = tbl.name.lower() if tbl.name else ""
-        if name in target_alias:
-            tbl.set("this", exp.Identifier(this=target_alias[name], quoted=False))
+    try:
+        # parse_one + .sql() is equivalent to transpile but lets us also
+        # walk the tree afterward for the ${ref()} rewrite.
+        tree = sqlglot.parse_one(sql, dialect="oracle")
+    except Exception:
+        return sql.rstrip(";")
 
-    out = tree.sql(dialect="bigquery")
-    # Wrap aliased table refs back into ${ref()}.
-    for original, replacement in target_alias.items():
-        out = out.replace(f"`{replacement}`", f"${{ref('{replacement}')}}")
-        out = out.replace(replacement, f"${{ref('{replacement}')}}")
-    return out
+    transpiled = tree.sql(dialect="bigquery")
+    return _wrap_tables_with_ref(transpiled, tree).rstrip(";")

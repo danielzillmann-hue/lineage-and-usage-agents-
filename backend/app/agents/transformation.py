@@ -59,7 +59,15 @@ async def run(req: RunRequest, results, emit: EmitFn, run_id: str) -> None:
     await log_event(emit, AgentName.TRANSFORM,
                     f"transforming {len(xml_files)} pipeline XMLs to Dataform SQLX")
 
-    project = generate_project(xml_files)
+    # Pull view definitions from the inventory (populated by the upstream
+    # inventory agent) so source declarations for views render as proper
+    # `type: "view"` blocks with the original SQL body.
+    views = _extract_views(results)
+    if views:
+        await log_event(emit, AgentName.TRANSFORM,
+                        f"found {len(views)} Oracle views with source SQL — porting as type:view")
+
+    project = generate_project(xml_files, views=views)
 
     await log_event(emit, AgentName.TRANSFORM,
                     f"generated {len(project.pipelines)} pipelines, "
@@ -88,3 +96,22 @@ async def run(req: RunRequest, results, emit: EmitFn, run_id: str) -> None:
             "warnings": len(manifest.warnings),
         },
     ))
+
+
+def _extract_views(results) -> dict[str, str]:
+    """Pull view source SQL from the inventory results, keyed by lowercase
+    view name. Returns an empty dict if the inventory hasn't run or no
+    views have source_text.
+    """
+    inv = getattr(results, "inventory", None)
+    if inv is None:
+        return {}
+    out: dict[str, str] = {}
+    for t in getattr(inv, "tables", []) or []:
+        if getattr(t, "kind", None) != "VIEW":
+            continue
+        sql = getattr(t, "source_text", None)
+        if not sql:
+            continue
+        out[t.name.lower()] = sql
+    return out

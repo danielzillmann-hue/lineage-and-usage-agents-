@@ -53,16 +53,28 @@ _NAME_PATTERN = re.compile(r"""^\s*name:\s*['"]([^'"]+)['"]""", re.MULTILINE)
 def assemble_project(
     generated: list[GeneratedFile],
     config: DataformProjectConfig | None = None,
+    views: dict[str, str] | None = None,
 ) -> AssembledProject:
-    """Bundle generated SQLX into a deployable Dataform project."""
+    """Bundle generated SQLX into a deployable Dataform project.
+
+    `views` is an optional dict of `{lowercase_view_name: oracle_view_sql}`.
+    When provided, source declarations for matching tables are upgraded
+    from `type: "declaration"` to `type: "view"` with the original SQL
+    body (translated to BigQuery dialect).
+    """
     config = config or DataformProjectConfig()
+    views = views or {}
     out = AssembledProject()
 
     # 1. Pass-through every generated SQLX into the project tree.
     for gf in generated:
         out.files[gf.path] = gf.content
         if gf.kind == "primary":
-            out.pipelines.append(gf.pipeline)
+            # File stem == the actual produced table name. Multi-stage
+            # pipelines (regulatory_audit_compliance) have multiple stems
+            # (stg_audit_master, fact_regulatory_audit) — list each one.
+            stem = gf.path.split("/")[-1].removesuffix(".sqlx")
+            out.pipelines.append(stem)
         elif gf.kind == "operations":
             out.operations.append(gf.path.split("/")[-1].removesuffix(".sqlx"))
 
@@ -72,9 +84,10 @@ def assemble_project(
     produced = _collect_produced_tables(generated)
     sources = sorted(refs - produced)
 
-    # 3. Generate a single sources.sqlx with one declaration per external table.
+    # 3. Generate sources.sqlx — declarations for raw tables, view bodies
+    # for known views.
     if sources:
-        out.files["definitions/sources.sqlx"] = _build_sources_sqlx(sources, config)
+        out.files["definitions/sources.sqlx"] = _build_sources_sqlx(sources, config, views)
         out.sources = sources
 
     # 4. Project-level workflow_settings.yaml.
@@ -121,24 +134,59 @@ def _collect_produced_tables(generated: list[GeneratedFile]) -> set[str]:
     return produced
 
 
-def _build_sources_sqlx(sources: list[str], config: DataformProjectConfig) -> str:
-    """One file with N type:'declaration' blocks — one per external table."""
+def _build_sources_sqlx(
+    sources: list[str],
+    config: DataformProjectConfig,
+    views: dict[str, str],
+) -> str:
+    """Sources file. Each external name renders as either:
+    - `type: "view"` with the original (translated) SQL body, when the
+      name matches a view from the inventory.
+    - `type: "declaration"` otherwise — pure pointer to the BQ table
+      replicated from Oracle.
+    """
     blocks: list[str] = []
     for s in sources:
-        blocks.append(f"""config {{
+        view_sql = views.get(s.lower())
+        if view_sql:
+            blocks.append(_view_block(s, view_sql))
+        else:
+            blocks.append(_declaration_block(s, config))
+    return (
+        "-- Sources — declarations for raw replicated tables, plus full\n"
+        "-- view definitions for any Oracle views the pipelines read from.\n"
+        "-- Declarations are pointers (no compile-time SQL); views are\n"
+        "-- materialised by Dataform from the original SQL body.\n\n"
+        + "\n\n".join(blocks)
+        + "\n"
+    )
+
+
+def _declaration_block(name: str, config: DataformProjectConfig) -> str:
+    return f"""config {{
   type: "declaration",
   database: "{config.gcp_project}",
   schema: "{config.source_dataset}",
-  name: "{s}",
+  name: "{name}",
   description: "Source table replicated from the Oracle warehouse.",
-}}""")
+}}"""
+
+
+def _view_block(name: str, oracle_sql: str) -> str:
+    """Render a Dataform `type: "view"` block from the original Oracle
+    CREATE VIEW SELECT body. Translates dialect to BigQuery and rewrites
+    bare table refs to ${ref()} so the view's deps are tracked.
+    """
+    # Local import to avoid a circular dependency.
+    from app.transformer.sql_helpers import render_dml_for_bigquery
+    body = render_dml_for_bigquery(oracle_sql).rstrip(";")
     return (
-        "-- Source declarations — these tables are produced upstream by the\n"
-        "-- Oracle → BigQuery replication, not by Dataform itself. Declaring\n"
-        "-- them here lets ${ref('table')} calls resolve to the correct BQ\n"
-        "-- location.\n\n"
-        + "\n\n".join(blocks)
-        + "\n"
+        f"config {{\n"
+        f'  type: "view",\n'
+        f'  name: "{name}",\n'
+        f'  description: "Oracle view ported to BigQuery — translated from CREATE VIEW source.",\n'
+        f"}}\n\n"
+        f"{body}"
     )
 
 

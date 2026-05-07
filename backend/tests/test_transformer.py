@@ -107,3 +107,51 @@ def test_workflow_settings_contains_gcp_config():
     assert "defaultProject:" in yaml
     assert "defaultLocation:" in yaml
     assert "defaultDataset:" in yaml
+
+
+def test_operations_dml_translated_to_bigquery():
+    """Oracle DML inside operations files gets dialect-translated and
+    table refs wrapped with ${ref()}."""
+    from app.transformer.sql_helpers import render_dml_for_bigquery
+
+    # SYSDATE → CURRENT_TIMESTAMP, target table → ${ref()}
+    out = render_dml_for_bigquery(
+        "UPDATE accounts SET status = 'X' WHERE open_date < SYSDATE - 365"
+    )
+    assert "${ref('accounts')}" in out
+    assert "SYSDATE" not in out
+    assert "CURRENT_TIMESTAMP" in out
+
+    # DELETE FROM target wrapping
+    out = render_dml_for_bigquery("DELETE FROM stg_daily_metrics")
+    assert "${ref('stg_daily_metrics')}" in out
+
+    # TRUNCATE TABLE target wrapping
+    out = render_dml_for_bigquery("TRUNCATE TABLE stg_audit_master")
+    assert "${ref('stg_audit_master')}" in out
+
+
+def test_view_block_renders_with_source_sql():
+    """When a view name is provided in the views dict, the source block
+    is `type: "view"` with the (translated) original SQL body."""
+    from app.transformer import assemble_project
+    from app.transformer.runner import GeneratedFile
+
+    # A primary file that references a view via ${ref()}, so the view
+    # name shows up in the sources list.
+    primary = GeneratedFile(
+        path="definitions/risk.sqlx",
+        content='config { type: "table" }\nSELECT * FROM ${ref(\'vw_member_risk\')}',
+        pipeline="risk",
+        kind="primary",
+        warnings=[],
+    )
+    project = assemble_project(
+        [primary],
+        views={"vw_member_risk": "SELECT member_id, risk_level FROM members WHERE active = 1"},
+    )
+    sources_sql = project.files["definitions/sources.sqlx"]
+    assert 'type: "view"' in sources_sql
+    assert 'name: "vw_member_risk"' in sources_sql
+    assert "SELECT" in sources_sql
+    assert "${ref('members')}" in sources_sql  # body's table ref also wrapped
