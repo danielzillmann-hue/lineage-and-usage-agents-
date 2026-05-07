@@ -114,3 +114,16 @@ def write_json(bucket: str, name: str, data: str) -> str:
     blob = client.bucket(bucket).blob(name)
     blob.upload_from_string(data, content_type="application/json")
     return f"gs://{bucket}/{name}"
+
+
+def write_text(bucket: str, name: str, data: str, content_type: str = "text/plain") -> str:
+    client = _client()
+    blob = client.bucket(bucket).blob(name)
+    blob.upload_from_string(data, content_type=content_type)
+    return f"gs://{bucket}/{name}"
+
+
+def list_blobs(bucket: str, prefix: str) -> list[str]:
+    """Return blob names under a prefix (no trailing slash needed)."""
+    client = _client()
+    return [b.name for b in client.list_blobs(bucket, prefix=prefix)]

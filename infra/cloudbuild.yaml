@@ -22,11 +22,15 @@ options:
 steps:
 
   # ─── 1. Build backend image ────────────────────────────────────────────
+  # Build context is the repo root so the Dockerfile can copy both
+  # backend/ (this service) and transformation-core/ (sibling library
+  # the backend pip-installs).
   - id: backend-build
     name: gcr.io/cloud-builders/docker
-    dir: backend
     args:
       - build
+      - -f
+      - backend/Dockerfile
       - -t
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_BACKEND_SERVICE}:$BUILD_ID
       - -t

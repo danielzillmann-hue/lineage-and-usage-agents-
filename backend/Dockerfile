@@ -7,10 +7,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY pyproject.toml ./
-RUN pip install --upgrade pip && pip install .
+# Build context is the repo ROOT (set by cloudbuild.yaml), so we copy from
+# both `transformation-core/` (sibling lib) and `backend/` (this service).
+COPY transformation-core /app/transformation-core
+RUN pip install --upgrade pip && pip install /app/transformation-core
 
-COPY app ./app
+COPY backend/pyproject.toml /app/pyproject.toml
+RUN pip install /app
+
+COPY backend/app /app/app
 
 ENV PORT=8080
 EXPOSE 8080
