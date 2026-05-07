@@ -131,11 +131,13 @@ export function LineageView({
 
   // Set of FQNs visible when a pipeline filter is active.
   //
-  // Rule: only the focused pipeline node + its DIRECT upstream/downstream
-  // neighbours, plus the documented destination of its output CSV. We then
-  // require BOTH endpoints of every edge to be in this set — otherwise any
-  // shared source table (e.g. ACCOUNTS) would drag every other pipeline
-  // that reads it back into view.
+  // Rule: walk the lineage TRANSITIVELY both upstream and downstream from
+  // the focused pipeline so the entire chain shows — including any staging
+  // pipelines that produce the focused pipeline's source tables, the raw
+  // tables those staging pipelines read, and any downstream consumers /
+  // delivery destinations. Then require BOTH endpoints of every edge to
+  // be in this set so shared source tables don't drag unrelated pipelines
+  // back in.
   const pipelineFilterSet = useMemo(() => {
     if (!pipelineFilter || !lineage) return null;
     const pipelineNodeId = `PIPELINE.${pipelineFilter}`;
@@ -149,15 +151,32 @@ export function LineageView({
       return fqn;
     };
 
-    // Direct neighbours only.
+    // Build collapsed adjacency for transitive BFS.
+    const upstream: Record<string, string[]> = {};
+    const downstream: Record<string, string[]> = {};
     for (const e of lineage.edges) {
       const cs = collapse(e.source_fqn);
       const ct = collapse(e.target_fqn);
-      if (cs === pipelineNodeId) set.add(ct);
-      if (ct === pipelineNodeId) set.add(cs);
+      if (cs === ct) continue;
+      (upstream[ct] ??= []).push(cs);
+      (downstream[cs] ??= []).push(ct);
     }
 
-    // Include the destination of any output CSV in the set, so the synthetic
+    const walk = (adj: Record<string, string[]>) => {
+      const queue: string[] = [pipelineNodeId];
+      while (queue.length) {
+        const node = queue.shift()!;
+        for (const next of adj[node] ?? []) {
+          if (set.has(next)) continue;
+          set.add(next);
+          queue.push(next);
+        }
+      }
+    };
+    walk(upstream);
+    walk(downstream);
+
+    // Include destinations of any output CSV in the set, so the synthetic
     // delivery edge survives the "both endpoints" filter.
     for (const d of inventory?.deliveries ?? []) {
       const csvName = d.csv_name.toLowerCase().replace(/\.csv$/, "");
