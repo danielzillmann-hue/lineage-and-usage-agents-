@@ -129,39 +129,46 @@ export function LineageView({
     return [...new Set(inventory?.pipelines.map((p) => p.name) ?? [])].sort();
   }, [inventory]);
 
-  // Set of FQNs visible when a pipeline filter is active
+  // Set of FQNs visible when a pipeline filter is active.
+  //
+  // Rule: only the focused pipeline node + its DIRECT upstream/downstream
+  // neighbours, plus the documented destination of its output CSV. We then
+  // require BOTH endpoints of every edge to be in this set — otherwise any
+  // shared source table (e.g. ACCOUNTS) would drag every other pipeline
+  // that reads it back into view.
   const pipelineFilterSet = useMemo(() => {
-    if (!pipelineFilter || !inventory || !lineage) return null;
-    const p = inventory.pipelines.find((pp) => pp.name === pipelineFilter);
-    if (!p) return null;
-    const set = new Set<string>();
-    set.add(`PIPELINE.${pipelineFilter}`);
-    // Source tables (SOURCE.<NAME>) the pipeline reads
-    for (const src of p.source_tables) {
-      set.add(`SOURCE.${src.toUpperCase()}`);
-      // Some edges reference real schema names — accept those too
-      const match = inventory.tables.find((t) => t.name.toUpperCase() === src.toUpperCase());
-      if (match) set.add(`${match.schema_name}.${match.name}`);
-    }
-    // Output CSV
-    if (p.output_csv) {
-      const short = p.output_csv.replace(/\.csv$/i, "").toUpperCase();
-      set.add(`OUTPUTS.${short}`);
-    }
-    // Walk the lineage to pull in step nodes belonging to this pipeline
+    if (!pipelineFilter || !lineage) return null;
+    const pipelineNodeId = `PIPELINE.${pipelineFilter}`;
+    const set = new Set<string>([pipelineNodeId]);
+
+    const collapse = (fqn: string): string => {
+      if (fqn.startsWith("PIPELINE.")) {
+        const parts = fqn.split(".");
+        return parts.length >= 2 ? `${parts[0]}.${parts[1]}` : fqn;
+      }
+      return fqn;
+    };
+
+    // Direct neighbours only.
     for (const e of lineage.edges) {
-      const collapse = (fqn: string): string => {
-        if (fqn.startsWith("PIPELINE.")) {
-          const parts = fqn.split(".");
-          return parts.length >= 2 ? `${parts[0]}.${parts[1]}` : fqn;
-        }
-        return fqn;
-      };
       const cs = collapse(e.source_fqn);
       const ct = collapse(e.target_fqn);
-      if (cs === `PIPELINE.${pipelineFilter}` || ct === `PIPELINE.${pipelineFilter}`) {
-        set.add(cs);
-        set.add(ct);
+      if (cs === pipelineNodeId) set.add(ct);
+      if (ct === pipelineNodeId) set.add(cs);
+    }
+
+    // Include the destination of any output CSV in the set, so the synthetic
+    // delivery edge survives the "both endpoints" filter.
+    for (const d of inventory?.deliveries ?? []) {
+      const csvName = d.csv_name.toLowerCase().replace(/\.csv$/, "");
+      for (const node of Array.from(set)) {
+        if (!node.startsWith("OUTPUTS.")) continue;
+        const nodeName = node.split(".").slice(1).join(".").toLowerCase();
+        if (nodeName === csvName) {
+          const prefix = d.kind === "external" ? "DELIVERY_EXT" : "DELIVERY_INT";
+          set.add(`${prefix}.${d.csv_name}`);
+          break;
+        }
       }
     }
     return set;
@@ -192,7 +199,9 @@ export function LineageView({
       const t = collapse(e.target_fqn);
       if (s === t) continue;
       if (pipelineFilterSet) {
-        if (!pipelineFilterSet.has(s) && !pipelineFilterSet.has(t)) continue;
+        // Strict: BOTH endpoints must be in the focus set, otherwise shared
+        // source tables would pull in every other pipeline that reads them.
+        if (!pipelineFilterSet.has(s) || !pipelineFilterSet.has(t)) continue;
       }
       nodeSet.add(s);
       nodeSet.add(t);
@@ -214,7 +223,9 @@ export function LineageView({
       if (!outputId) continue;
       const kindPrefix = d.kind === "external" ? "DELIVERY_EXT" : "DELIVERY_INT";
       const destId = `${kindPrefix}.${d.csv_name}`;
-      if (pipelineFilterSet && !pipelineFilterSet.has(outputId)) continue;
+      // When focused on a pipeline, only synthesise a destination if its output
+      // CSV is the one belonging to the focused chain.
+      if (pipelineFilterSet && (!pipelineFilterSet.has(outputId) || !pipelineFilterSet.has(destId))) continue;
       nodeSet.add(destId);
       const edgeKey = `${outputId}→${destId}`;
       if (!edgeSet.has(edgeKey)) {
