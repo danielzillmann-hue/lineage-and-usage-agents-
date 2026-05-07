@@ -767,26 +767,57 @@ function GraphSVG({
         <pattern id="dotgrid" width="24" height="24" patternUnits="userSpaceOnUse">
           <circle cx="1" cy="1" r="0.6" fill="var(--line-strong)" opacity="0.5" />
         </pattern>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#6B7884" />
+        </marker>
+        <marker id="arrow-dim" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--line)" />
+        </marker>
       </defs>
       <rect width={W} height={H} fill="url(#dotgrid)" opacity="0.5" />
 
-      {/* Edges */}
+      {/* Edges — orthogonal H-V-H with rounded line-joins and arrow heads */}
       {edges.map((e, i) => {
         const a = pos[e.src];
         const b = pos[e.dst];
         if (!a || !b) return null;
         const dim = !!selected && !(focusSet?.has(e.src) && focusSet?.has(e.dst));
-        const x1 = a.x + 80, x2 = b.x - 80, y1 = a.y, y2 = b.y;
-        const cx1 = x1 + (x2 - x1) * 0.5;
-        const cx2 = x1 + (x2 - x1) * 0.5;
+        // Anchor points on each node's right/left edge (slight offset for
+        // parallelograms — table-kind nodes have a 8px slant).
+        const x1 = a.x + 88;
+        const x2 = b.x - 88;
+        const y1 = a.y;
+        const y2 = b.y;
+        const midX = x1 + (x2 - x1) * 0.5;
+        // Elbow path with rounded corners via Q (quadratic) at the bends.
+        const r = 8;
+        const yDir = y2 > y1 ? 1 : y2 < y1 ? -1 : 0;
+        let d: string;
+        if (yDir === 0) {
+          d = `M${x1},${y1} L${x2},${y2}`;
+        } else {
+          d = (
+            `M${x1},${y1} ` +
+            `L${midX - r},${y1} ` +
+            `Q${midX},${y1} ${midX},${y1 + r * yDir} ` +
+            `L${midX},${y2 - r * yDir} ` +
+            `Q${midX},${y2} ${midX + r},${y2} ` +
+            `L${x2},${y2}`
+          );
+        }
         return (
           <path
             key={i}
-            d={`M${x1},${y1} C${cx1},${y1} ${cx2},${y2} ${x2},${y2}`}
+            d={d}
             fill="none"
-            stroke={dim ? "var(--line)" : "var(--ink-4)"}
-            strokeOpacity={dim ? 0.3 : 0.55}
-            strokeWidth={1}
+            stroke={dim ? "var(--line)" : "#6B7884"}
+            strokeOpacity={dim ? 0.3 : 0.7}
+            strokeWidth={1.25}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            markerEnd={dim ? "url(#arrow-dim)" : "url(#arrow)"}
             style={{ transition: "opacity .2s, stroke .2s" }}
           />
         );
@@ -802,7 +833,6 @@ function GraphSVG({
         const isFocused = !selected || focusSet?.has(id);
         const dim = !isMatch || !isFocused || !layerOk(id);
         const isSel = selected === id;
-        // Pipeline labels use the bare pipeline name; tables show schema.name minus prefixes.
         let label: string;
         if (kind === "pipeline") {
           label = id.replace(/^PIPELINE\./, "");
@@ -811,31 +841,58 @@ function GraphSVG({
         } else {
           label = id.split(".").slice(-2).join(".");
         }
-        // Pipeline nodes get rounder corners + slightly taller; emphasises shape.
-        const rectW = kind === "pipeline" ? 175 : 160;
-        const rectH = 28;
-        const rx = kind === "pipeline" ? 14 : 4;
+
+        const isPipeline = kind === "pipeline";
+        const w = isPipeline ? 175 : 168;
+        const h = 30;
+        // Tables are rendered as parallelograms (data-flow symbol) — 8px slant.
+        // Pipelines are rendered as rounded rectangles (process symbol).
+        const slant = 8;
+        const cx = p.x;
+        const cy = p.y;
+        const shape: React.ReactNode = isPipeline ? (
+          <rect
+            x={cx - w / 2}
+            y={cy - h / 2}
+            width={w}
+            height={h}
+            rx={15}
+            fill={c.fill}
+            stroke={isSel ? "#0FB37A" : c.stroke}
+            strokeWidth={isSel ? 2 : 1.5}
+          />
+        ) : (
+          <polygon
+            points={[
+              `${cx - w / 2 + slant},${cy - h / 2}`,
+              `${cx + w / 2 + slant},${cy - h / 2}`,
+              `${cx + w / 2 - slant},${cy + h / 2}`,
+              `${cx - w / 2 - slant},${cy + h / 2}`,
+            ].join(" ")}
+            fill={c.fill}
+            stroke={isSel ? "#0FB37A" : c.stroke}
+            strokeWidth={isSel ? 2 : 1.5}
+            strokeLinejoin="round"
+          />
+        );
+
         return (
           <g
             key={id}
             style={{ cursor: "pointer", opacity: dim ? 0.18 : 1, transition: "opacity .2s" }}
             onClick={() => onSelect(id)}
           >
-            <rect
-              x={p.x - rectW / 2}
-              y={p.y - rectH / 2}
-              width={rectW}
-              height={rectH}
-              rx={rx}
-              fill={c.fill}
-              stroke={isSel ? "#0FB37A" : c.stroke}
-              strokeWidth={isSel ? 2 : 1.5}
-            />
+            {shape}
             <text
-              x={p.x}
-              y={p.y + 4}
+              x={cx}
+              y={cy + 4}
               textAnchor="middle"
-              style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fill: c.text, fontWeight: kind === "pipeline" ? 500 : 400 }}
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 10.5,
+                fill: c.text,
+                fontWeight: isPipeline ? 500 : 400,
+              }}
             >
               {label.length > 24 ? label.slice(0, 23) + "…" : label}
             </text>
