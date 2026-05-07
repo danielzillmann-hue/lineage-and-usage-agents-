@@ -363,16 +363,26 @@ export function LineageView({
   }
 
   // When fullscreen the whole grid pops out of normal flow into a fixed overlay.
+  // Critical: the parent gets explicit 100vh height and overflow:hidden so the
+  // grid children — each with their own overflow-y:auto — actually scroll
+  // instead of getting clipped at the viewport edge.
   const containerStyle: React.CSSProperties = fullscreen
     ? {
         position: "fixed", inset: 0, zIndex: 80,
-        display: "grid", gridTemplateColumns: "320px 1fr 340px",
+        display: "grid",
+        gridTemplateColumns: "320px 1fr 340px",
+        gridTemplateRows: "100vh",
+        height: "100vh",
+        overflow: "hidden",
         background: "var(--bg)",
       }
     : {
         display: "grid", gridTemplateColumns: "320px 1fr 340px",
         minHeight: 720, background: "var(--bg)",
       };
+
+  // Common grid-cell style that lets content scroll within its column.
+  const cellMinHeight: React.CSSProperties = fullscreen ? { minHeight: 0 } : {};
 
   return (
     <div style={containerStyle}>
@@ -383,6 +393,7 @@ export function LineageView({
           padding: "24px 22px",
           overflowY: "auto",
           background: "var(--bg-elev)",
+          ...cellMinHeight,
         }}
       >
         <div className="eyebrow">Explore</div>
@@ -538,7 +549,7 @@ export function LineageView({
       </aside>
 
       {/* ─── Graph canvas ────────────────────────────────────── */}
-      <div style={{ position: "relative", padding: 20, borderRight: "1px solid var(--line)" }}>
+      <div style={{ position: "relative", padding: 20, borderRight: "1px solid var(--line)", ...cellMinHeight, overflow: fullscreen ? "auto" : undefined }}>
         <div style={{ position: "absolute", top: 28, left: 28, display: "flex", gap: 8, zIndex: 2 }}>
           <span
             className="mono"
@@ -599,7 +610,7 @@ export function LineageView({
       </div>
 
       {/* ─── Inspector ───────────────────────────────────────── */}
-      <aside style={{ background: "var(--bg-elev)", padding: 24, overflowY: "auto" }}>
+      <aside style={{ background: "var(--bg-elev)", padding: 24, overflowY: "auto", ...cellMinHeight }}>
         {sel ? (
           <>
             <div className="eyebrow">{KIND_LABEL[inferKind(sel.id)]}</div>
