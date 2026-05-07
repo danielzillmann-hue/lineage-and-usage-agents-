@@ -551,7 +551,7 @@ export function LineageView({
       </aside>
 
       {/* ─── Graph canvas ────────────────────────────────────── */}
-      <div style={{ position: "relative", padding: 20, borderRight: "1px solid var(--line)", ...cellMinHeight, overflow: fullscreen ? "auto" : undefined }}>
+      <div style={{ position: "relative", padding: 20, borderRight: "1px solid var(--line)", ...cellMinHeight, overflow: "hidden" }}>
         <div style={{ position: "absolute", top: 28, left: 28, display: "flex", gap: 8, zIndex: 2 }}>
           <span
             className="mono"
@@ -584,12 +584,15 @@ export function LineageView({
         </div>
         <div
           style={{
-            height: "100%",
+            // In fullscreen: this is the scroll container — show both x/y
+            // scrollbars when the native-sized SVG overflows.
+            // Otherwise: standard scale-to-fit, no scroll.
+            height: fullscreen ? "calc(100vh - 40px)" : "100%",
             minHeight: 600,
             border: "1px solid var(--line)",
             borderRadius: 8,
             background: "var(--bg-elev)",
-            overflow: "hidden",
+            overflow: fullscreen ? "auto" : "hidden",
           }}
         >
           <GraphSVG
