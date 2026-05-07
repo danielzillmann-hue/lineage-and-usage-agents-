@@ -4,17 +4,27 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Database, Folder, ArrowRight, Loader2, CheckCircle2, AlertCircle, Plug, Search,
+  GitBranch, Activity, Sparkles, FileCode2, Workflow,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { AgentName, OracleConnection, TestConnectionResponse } from "@/lib/types";
 
-const AGENTS: { id: AgentName; name: string; desc: string }[] = [
-  { id: "inventory", name: "Inventory Agent",         desc: "Oracle introspection — tables, views, columns, FKs, audit log" },
-  { id: "lineage",   name: "Lineage Agent",           desc: "Column-level lineage from ETL XML pipelines and FK relationships" },
-  { id: "usage",     name: "Usage Agent",             desc: "Pipeline run history, success rates, undocumented executions" },
-  { id: "summary",   name: "Executive Summary Agent", desc: "Synthesis: headline, findings, recommendations" },
-  { id: "transform", name: "Transformation Agent",    desc: "Generate Dataform SQLX from the Oracle pipelines (BigQuery target)" },
-  { id: "orchestration", name: "Orchestration Agent", desc: "Generate a GitHub Actions workflow (compile-on-push + scheduled run)" },
+type AgentSpec = {
+  id: AgentName;
+  name: string;
+  desc: string;
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  tint: string; // foreground accent colour
+  bg: string;   // tinted background when active
+};
+
+const AGENTS: AgentSpec[] = [
+  { id: "inventory",     name: "Inventory",     desc: "Live Oracle introspection — tables, views, columns, FKs, audit log",        icon: Database,  tint: "#0288D1", bg: "#E1F5FE" },
+  { id: "lineage",       name: "Lineage",       desc: "Column-level lineage from ETL XML pipelines and FK relationships",          icon: GitBranch, tint: "#00838F", bg: "#E0F2F1" },
+  { id: "usage",         name: "Usage",         desc: "Pipeline run history, success rates, undocumented executions",              icon: Activity,  tint: "#388E3C", bg: "#E8F5E9" },
+  { id: "summary",       name: "Summary",       desc: "Gemini synthesis: headline, findings, recommendations",                     icon: Sparkles,  tint: "#F57C00", bg: "#FFF3E0" },
+  { id: "transform",     name: "Transformation", desc: "Generate Dataform SQLX from the Oracle pipelines (BigQuery target)",       icon: FileCode2, tint: "#0FB37A", bg: "#E8F5E9" },
+  { id: "orchestration", name: "Orchestration", desc: "Generate a GitHub Actions workflow (compile-on-push + scheduled run)",      icon: Workflow,  tint: "#0A8B5E", bg: "#E0F2F1" },
 ];
 
 export function SetupForm() {
@@ -109,14 +119,14 @@ export function SetupForm() {
         className="text-pretty"
         style={{ fontSize: 17, lineHeight: 1.55, color: "var(--ink-2)", maxWidth: 640, margin: 0 }}
       >
-        Four agents introspect your live database, parse your ETL pipelines, and map column-level
-        lineage end-to-end. Surfaces hot tables, broken pipelines, undocumented ETL, and dead weight —
-        in minutes, not weeks.
+        Six agents introspect your live database, map column-level lineage, score usage, generate
+        Dataform SQLX, and emit a CI workflow — in minutes, not weeks. Toggle any agent on or off
+        in the picker to the right.
       </p>
 
       <div
         className="grid gap-10"
-        style={{ gridTemplateColumns: "1fr 360px", marginTop: 56, alignItems: "start" }}
+        style={{ gridTemplateColumns: "1fr 420px", marginTop: 56, alignItems: "start" }}
       >
         {/* ─── LEFT column — form ────────────────────────────────── */}
         <div>
@@ -191,66 +201,114 @@ export function SetupForm() {
             </div>
           </section>
 
-          {/* Section 03 — Pipeline (numbered list) */}
-          <section style={{ marginTop: 48 }}>
-            <div className="eyebrow">03 · Pipeline</div>
-            <h2 style={{ fontSize: 20, fontWeight: 500, margin: "8px 0 4px", letterSpacing: "-0.01em" }}>
-              Run the full pipeline, or pick stages
-            </h2>
-            <p style={{ color: "var(--ink-3)", fontSize: 14, margin: "0 0 24px" }}>
-              Each stage feeds the next. Results are auto-saved per run.
-            </p>
-
-            <ol style={{ listStyle: "none", padding: 0, margin: 0, position: "relative" }}>
-              <div style={{ position: "absolute", left: 15, top: 24, bottom: 24, width: 1, background: "var(--line)" }} />
-              {AGENTS.map((a, i) => {
-                const on = active.includes(a.id);
-                return (
-                  <li
-                    key={a.id}
-                    style={{ position: "relative", display: "flex", gap: 18, padding: "14px 0", alignItems: "flex-start" }}
-                  >
-                    <div
-                      style={{
-                        width: 32, height: 32, borderRadius: 6,
-                        border: `1px solid ${on ? "var(--brand-emerald)" : "var(--line)"}`,
-                        background: on ? "var(--brand-emerald-100)" : "var(--bg-elev)",
-                        color: on ? "var(--brand-emerald-700)" : "var(--ink-3)",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600,
-                        flexShrink: 0, zIndex: 1,
-                      }}
-                    >
-                      {String(i + 1).padStart(2, "0")}
-                    </div>
-                    <div style={{ flex: 1, paddingTop: 4 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                        <div style={{ fontSize: 15, fontWeight: 500, color: "var(--ink)" }}>{a.name}</div>
-                        <button
-                          onClick={() => toggle(a.id)}
-                          className="mono"
-                          style={{
-                            background: "transparent", border: 0, cursor: "pointer",
-                            color: on ? "var(--ink-2)" : "var(--ink-3)",
-                            fontSize: 12, padding: 4,
-                          }}
-                        >
-                          {on ? "✓ included" : "skip"}
-                        </button>
-                      </div>
-                      <div style={{ fontSize: 13.5, color: "var(--ink-3)", marginTop: 2, lineHeight: 1.5 }}>
-                        {a.desc}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
-          </section>
         </div>
 
         {/* ─── RIGHT column — sticky aside ───────────────────────── */}
-        <aside style={{ position: "sticky", top: 96 }}>
+        <aside style={{ position: "sticky", top: 96, display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Agents picker — always visible while you fill the form */}
+          <div style={{ border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-elev)", overflow: "hidden" }}>
+            <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--line)" }}>
+              <div className="eyebrow">Agents</div>
+              <div style={{ fontSize: 15, fontWeight: 500, marginTop: 6, color: "var(--ink)" }}>
+                Pick what runs
+              </div>
+              <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 4, lineHeight: 1.5 }}>
+                Each agent feeds the next where useful — Lineage uses Inventory, Summary uses
+                Inventory + Lineage + Usage, Transformation reads everything. Toggle individually
+                or use the shortcuts below.
+              </div>
+              <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                <button
+                  onClick={() => setActive(AGENTS.map((a) => a.id))}
+                  className="mono"
+                  style={{
+                    fontSize: 11, padding: "3px 9px", background: "transparent",
+                    color: "var(--ink-2)", border: "1px solid var(--line)",
+                    borderRadius: 99, cursor: "pointer",
+                  }}
+                >
+                  all on
+                </button>
+                <button
+                  onClick={() => setActive([])}
+                  className="mono"
+                  style={{
+                    fontSize: 11, padding: "3px 9px", background: "transparent",
+                    color: "var(--ink-2)", border: "1px solid var(--line)",
+                    borderRadius: 99, cursor: "pointer",
+                  }}
+                >
+                  all off
+                </button>
+              </div>
+            </div>
+            <ul style={{ listStyle: "none", padding: 8, margin: 0 }}>
+              {AGENTS.map((a) => {
+                const on = active.includes(a.id);
+                const Icon = a.icon;
+                return (
+                  <li key={a.id} style={{ marginBottom: 4 }}>
+                    <button
+                      onClick={() => toggle(a.id)}
+                      style={{
+                        display: "flex", gap: 12, alignItems: "flex-start",
+                        width: "100%", padding: "10px 12px",
+                        textAlign: "left", cursor: "pointer",
+                        background: on ? a.bg : "transparent",
+                        border: `1px solid ${on ? a.tint : "var(--line)"}`,
+                        borderRadius: 6,
+                        opacity: on ? 1 : 0.65,
+                        transition: "opacity .15s, background .15s, border-color .15s",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 30, height: 30, borderRadius: 6,
+                          background: on ? a.tint : "var(--bg)",
+                          color: on ? "#fff" : "var(--ink-3)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Icon className="h-4 w-4" strokeWidth={1.5} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                          gap: 8,
+                        }}>
+                          <span style={{
+                            fontSize: 13.5, fontWeight: 500,
+                            color: on ? "var(--ink)" : "var(--ink-2)",
+                          }}>{a.name}</span>
+                          <span
+                            className="mono"
+                            style={{
+                              fontSize: 10, padding: "2px 7px",
+                              background: on ? a.tint : "transparent",
+                              color: on ? "#fff" : "var(--ink-3)",
+                              border: on ? "none" : "1px solid var(--line)",
+                              borderRadius: 99, flexShrink: 0,
+                            }}
+                          >
+                            {on ? "ON" : "OFF"}
+                          </span>
+                        </div>
+                        <div style={{
+                          fontSize: 11.5, color: "var(--ink-3)",
+                          lineHeight: 1.45, marginTop: 3,
+                        }}>
+                          {a.desc}
+                        </div>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+
+          {/* Run summary card */}
           <div style={{ border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-elev)", overflow: "hidden" }}>
             <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--line)" }}>
               <div className="eyebrow">Run summary</div>
