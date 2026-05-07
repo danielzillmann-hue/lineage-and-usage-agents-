@@ -205,6 +205,40 @@ export function SetupForm() {
 
         {/* ─── RIGHT column — sticky aside ───────────────────────── */}
         <aside style={{ position: "sticky", top: 96, display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Run button — sits above the agents picker so it's the
+              clearest call-to-action on the page. */}
+          <div>
+            <button
+              onClick={onRun}
+              disabled={!canRun}
+              style={{
+                ...btnPrimary,
+                width: "100%", justifyContent: "center",
+                padding: "14px 16px", fontSize: 15, fontWeight: 500,
+                opacity: canRun ? 1 : 0.5,
+                cursor: canRun ? "pointer" : "not-allowed",
+              }}
+            >
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {submitting
+                ? "Starting…"
+                : `Run ${active.length} of ${AGENTS.length} agent${active.length === 1 ? "" : "s"}`}
+              {!submitting && <ArrowRight className="h-4 w-4" strokeWidth={1.5} />}
+            </button>
+            <div className="mono" style={{
+              fontSize: 11, color: "var(--ink-4)", textAlign: "center",
+              marginTop: 8,
+            }}>
+              ~ 3 min · Vertex AI · australia-southeast1
+            </div>
+            {error && (
+              <div className="px-3 py-2 mt-2 text-xs"
+                   style={{ color: "var(--crit)", background: "var(--crit-bg)", borderRadius: 6 }}>
+                {error}
+              </div>
+            )}
+          </div>
+
           {/* Agents picker — always visible while you fill the form */}
           <div style={{ border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-elev)", overflow: "hidden" }}>
             <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--line)" }}>
@@ -308,37 +342,6 @@ export function SetupForm() {
             </ul>
           </div>
 
-          {/* Run summary card */}
-          <div style={{ border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-elev)", overflow: "hidden" }}>
-            <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--line)" }}>
-              <div className="eyebrow">Run summary</div>
-              <div style={{ fontSize: 15, fontWeight: 500, marginTop: 6, color: "var(--ink)" }}>
-                Streaming progress per agent
-              </div>
-            </div>
-            <dl style={{ margin: 0, padding: "8px 18px" }}>
-              <SummaryRow k="Database" v={`${conn.host}:${conn.port}/${conn.service}`} mono />
-              <SummaryRow k="Bucket" v={bucket || "—"} mono />
-              <SummaryRow k="Prefix" v={prefix || "(root)"} mono />
-              <SummaryRow k="Stages" v={`${active.length} of ${AGENTS.length}`} mono />
-              <SummaryRow k="Synthesis model" v="gemini-2.5-pro" mono />
-            </dl>
-            {error && (
-              <div className="mx-4 my-2 px-3 py-2 text-xs" style={{ color: "var(--crit)", background: "var(--crit-bg)", borderRadius: 6 }}>
-                {error}
-              </div>
-            )}
-            <div style={{ padding: 16 }}>
-              <button onClick={onRun} disabled={!canRun} style={{ ...btnPrimary, width: "100%", justifyContent: "center", padding: "12px 16px" }}>
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                {submitting ? "Starting…" : "Run analysis"}
-                {!submitting && <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.5} />}
-              </button>
-              <div className="mono" style={{ fontSize: 11, color: "var(--ink-4)", textAlign: "center", marginTop: 10 }}>
-                ~ 3 min · Vertex AI · australia-southeast1
-              </div>
-            </div>
-          </div>
         </aside>
       </div>
     </div>
@@ -362,31 +365,6 @@ const btnSecondary: React.CSSProperties = {
   background: "var(--bg-elev)", color: "var(--ink)", border: "1px solid var(--line)",
   cursor: "pointer", transition: "background .15s, border-color .15s",
 };
-
-function SummaryRow({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
-  return (
-    <div
-      style={{
-        display: "flex", justifyContent: "space-between",
-        padding: "10px 0", borderBottom: "1px dashed var(--line)",
-        fontSize: 13,
-      }}
-    >
-      <dt style={{ color: "var(--ink-3)" }}>{k}</dt>
-      <dd
-        className={mono ? "mono" : ""}
-        style={{
-          margin: 0, textAlign: "right", maxWidth: "60%",
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-          color: "var(--ink-2)", fontSize: mono ? 12.5 : 13,
-        }}
-        title={v}
-      >
-        {v}
-      </dd>
-    </div>
-  );
-}
 
 function MonoInputField({
   label, icon, value, onChange, type = "text", className,
