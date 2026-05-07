@@ -14,6 +14,7 @@ import { LineageView } from "./LineageView";
 import { UsageView } from "./UsageView";
 import { FindingsView } from "./FindingsView";
 import { MigrationView } from "./MigrationView";
+import { TransformView } from "./TransformView";
 
 export function ResultsView({ runId }: { runId: string }) {
   const [run, setRun] = useState<Run | null>(null);
@@ -110,6 +111,7 @@ export function ResultsView({ runId }: { runId: string }) {
               <TabsTrigger value="lineage">Lineage</TabsTrigger>
               <TabsTrigger value="usage">Usage</TabsTrigger>
               <TabsTrigger value="migration">Migration</TabsTrigger>
+              <TabsTrigger value="transform">Transform</TabsTrigger>
               <TabsTrigger value="findings">
                 Findings
                 {findingCount > 0 && (
@@ -151,6 +153,11 @@ export function ResultsView({ runId }: { runId: string }) {
             <TabsContent value="migration" className="mt-0">
               <div style={{ maxWidth: 1400, margin: "0 auto", padding: "32px 32px 64px" }}>
                 <MigrationView inventory={results.inventory} runId={runId} />
+              </div>
+            </TabsContent>
+            <TabsContent value="transform" className="mt-0">
+              <div style={{ marginTop: 0 }}>
+                <TransformView runId={runId} />
               </div>
             </TabsContent>
             <TabsContent value="findings" className="mt-0">

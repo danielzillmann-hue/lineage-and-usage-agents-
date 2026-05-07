@@ -33,6 +33,40 @@ export const api = {
     jfetch<Column>(`/api/runs/${id}/columns`, { method: "PATCH", body: JSON.stringify(update) }),
 
   streamUrl: (id: string) => `${API_BASE}/api/runs/${id}/stream`,
+
+  // ─── Transform tab ────────────────────────────────────────────────
+  transformGenerate: (id: string) =>
+    jfetch<TransformResponse>(`/api/runs/${id}/transform`, { method: "POST" }),
+  transformManifest: (id: string) =>
+    jfetch<TransformManifestResponse>(`/api/runs/${id}/transform`),
+  transformListFiles: (id: string) =>
+    jfetch<string[]>(`/api/runs/${id}/transform/files`),
+  transformReadFile: async (id: string, path: string): Promise<string> => {
+    const r = await fetch(`${API_BASE}/api/runs/${id}/transform/files/${path}`, { cache: "no-store" });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.text();
+  },
+  transformDownloadUrl: (id: string) =>
+    `${API_BASE}/api/runs/${id}/transform/download.zip`,
+};
+
+export type TransformResponse = {
+  run_id: string;
+  pipelines_generated: number;
+  sources_declared: number;
+  operations_generated: number;
+  files: string[];
+  warnings: string[];
+};
+
+export type TransformManifestResponse = {
+  run_id: string;
+  pipelines: string[];
+  sources: string[];
+  operations: string[];
+  files: string[];
+  warnings: string[];
+  generated_at: string;
 };
 
 export function streamRun(
