@@ -1,0 +1,103 @@
+"""
+SQLX Wrapper — Wraps a SQL string with a Dataform SQLX config block.
+
+This is the final stage: takes clean SQL from sql_generator and adds
+the Dataform-specific config block, header comments, and SQLX formatting.
+"""
+
+from __future__ import annotations
+
+import re
+from transformation_core.ir import DataflowGraph
+from transformation_core.naming import to_pascal_name
+
+
+def wrap_sqlx(graph: DataflowGraph, sql: str) -> str:
+    """Wrap generated SQL with SQLX config and header.
+
+    Args:
+        graph: The DataflowGraph containing metadata.
+        sql: The generated SQL from sql_generator.
+
+    Returns:
+        Complete SQLX file content.
+    """
+    # Cache-warming mappings: produce a comment-only file
+    if graph.table_type == "skip":
+        return (
+            f"-- Skipped: {graph.mapping_name}\n"
+            f"--\n"
+            f"{graph.description}\n"
+        )
+
+    parts = []
+
+    # Header comment — use only the first line/sentence to avoid
+    # multi-line descriptions leaking bare text before config block.
+    # Full description is already in the config block.
+    parts.append(f"-- Dataform transformation: {graph.mapping_name}")
+    if graph.description:
+        # Take first paragraph (up to first blank line or \n\n)
+        first_para = re.split(r'\r?\n\s*\r?\n', graph.description)[0]
+        # Take first sentence if still long
+        first_para = first_para.replace('\r', '').replace('\n', ' ').strip()
+        if len(first_para) > 200:
+            cut = first_para.rfind('.', 0, 200)
+            if cut > 50:
+                first_para = first_para[:cut + 1]
+            else:
+                first_para = first_para[:200]
+        parts.append(f"-- Description: {first_para}")
+    parts.append("")
+
+    # Config block
+    config = _build_config(graph)
+    parts.append(config)
+    parts.append("")
+
+    # SQL body
+    parts.append(sql)
+
+    return "\n".join(parts)
+
+
+def _build_config(graph: DataflowGraph) -> str:
+    """Build the SQLX config block."""
+    lines = ["config {"]
+
+    # Type
+    table_type = graph.table_type
+    lines.append(f'  type: "{table_type}",')
+
+    # Schema
+    if graph.schema:
+        lines.append(f'  schema: "{graph.schema}",')
+
+    # Name (target table)
+    if graph.target.target_table:
+        name = _sanitize_sqlx_name(graph.target.target_table)
+        lines.append(f'  name: "{name}",')
+
+    # Tags
+    if graph.tags:
+        tag_str = ", ".join(f'"{t}"' for t in graph.tags)
+        lines.append(f"  tags: [{tag_str}],")
+
+    # Incremental config
+    if table_type == "incremental" and graph.target.unique_key:
+        key_str = ", ".join(f'"{k}"' for k in graph.target.unique_key)
+        lines.append(f"  uniqueKey: [{key_str}],")
+
+    # Description
+    desc = graph.description or f"Transformation from {graph.mapping_name}"
+    desc = desc.replace('"', '\\"')
+    lines.append(f'  description: "{desc}",')
+
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _sanitize_sqlx_name(name: str) -> str:
+    """Convert a name to a valid SQLX identifier with PascalCase convention."""
+    sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', name).strip('_').lower()
+    return to_pascal_name(sanitized)

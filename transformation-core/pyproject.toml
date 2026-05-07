@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "transformation-core"
+version = "0.1.0"
+description = "Source-agnostic IR + SQL/SQLX generation lifted from the Transformation Agent. Consumers (Informatica adapter, Insignia XML adapter, etc.) build IR; this package generates BigQuery-compatible Dataform SQLX from it."
+requires-python = ">=3.11"
+authors = [{ name = "intelia" }]
+dependencies = []
+
+[tool.setuptools]
+packages = ["transformation_core"]
