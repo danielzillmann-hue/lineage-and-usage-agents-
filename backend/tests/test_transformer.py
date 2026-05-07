@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from app.transformer import generate_sqlx, parse
+from app.transformer import generate_project, generate_sqlx, parse
 
 
 SAMPLE_XML_DIR = Path("C:/Users/DanielZillmann/AppData/Local/Temp/xml_test")
@@ -75,3 +75,35 @@ def test_operations_sqlx_for_dml():
     assert ops, "no operations SQLX produced"
     for f in ops:
         assert 'type: "operations"' in f.content
+
+
+def test_project_assembly_has_all_required_files():
+    """generate_project bundles the SQLX into a deployable Dataform repo."""
+    project = generate_project(_load_samples())
+    assert "workflow_settings.yaml" in project.files
+    assert "README.md" in project.files
+    assert "definitions/sources.sqlx" in project.files
+    # At least one primary pipeline file
+    primary = [p for p in project.files if p.startswith("definitions/")
+               and not p.startswith("definitions/operations/")
+               and p != "definitions/sources.sqlx"]
+    assert primary, "no primary SQLX in project"
+
+
+def test_sources_excludes_internally_produced_tables():
+    """stg_audit_master is produced by regulatory_audit_compliance stage 1
+    and consumed by stage 2 — it should NOT be declared as an external source.
+    """
+    project = generate_project(_load_samples())
+    assert "stg_audit_master" not in project.sources
+    # But the external Oracle tables MUST be declared
+    assert "transactions" in project.sources
+    assert "members" in project.sources
+
+
+def test_workflow_settings_contains_gcp_config():
+    project = generate_project(_load_samples())
+    yaml = project.files["workflow_settings.yaml"]
+    assert "defaultProject:" in yaml
+    assert "defaultLocation:" in yaml
+    assert "defaultDataset:" in yaml

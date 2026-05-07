@@ -10,6 +10,11 @@ from dataclasses import dataclass
 
 from transformation_core import SQLGenerator, wrap_sqlx
 
+from app.transformer.dataform_project import (
+    AssembledProject,
+    DataformProjectConfig,
+    assemble_project,
+)
 from app.transformer.insignia_to_ir import OperationsScript, TransformResult, parse
 
 
@@ -67,6 +72,20 @@ def generate_sqlx(xml_files: list[tuple[str, str]]) -> list[GeneratedFile]:
             ))
 
     return out
+
+
+def generate_project(
+    xml_files: list[tuple[str, str]],
+    config: DataformProjectConfig | None = None,
+) -> AssembledProject:
+    """End-to-end: pipeline XMLs → complete Dataform project.
+
+    Convenience wrapper over `generate_sqlx` + `assemble_project`. The
+    returned `AssembledProject.files` is a flat dict[path -> content]
+    ready to write to disk, upload to GCS, or zip.
+    """
+    files = generate_sqlx(xml_files)
+    return assemble_project(files, config)
 
 
 def _wrap_operations(op: OperationsScript) -> str:
