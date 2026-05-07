@@ -12,21 +12,27 @@ import type { Inventory, Layer, LineageEdge, LineageGraph, Sensitivity } from "@
 //   output   → pink   (CSV / file outputs)
 //   external → purple (CSVs flowing IN that aren't from the DB)
 //   unknown  → grey
-type NodeKind = "raw" | "staging" | "core" | "pipeline" | "output" | "external" | "unknown";
+type NodeKind =
+  | "raw" | "staging" | "core" | "pipeline" | "output" | "external"
+  | "delivery_internal" | "delivery_external" | "unknown";
 
 const KIND_STYLES: Record<NodeKind, { fill: string; stroke: string; text: string; dot: string }> = {
-  raw:      { fill: "#E1F5FE", stroke: "#0288D1", text: "#01579B", dot: "#0288D1" },
-  staging:  { fill: "#FFF3E0", stroke: "#F57C00", text: "#E65100", dot: "#F57C00" },
-  core:     { fill: "#E8F5E9", stroke: "#388E3C", text: "#1B5E20", dot: "#388E3C" },
-  pipeline: { fill: "#1F1F1F", stroke: "#1F1F1F", text: "#FFFFFF", dot: "#1F1F1F" },
-  output:   { fill: "#FCE4EC", stroke: "#C2185B", text: "#880E4F", dot: "#C2185B" },
-  external: { fill: "#EDE7F6", stroke: "#512DA8", text: "#311B92", dot: "#512DA8" },
-  unknown:  { fill: "var(--bg-sunk)", stroke: "var(--line-strong)", text: "var(--ink-3)", dot: "var(--line-strong)" },
+  raw:               { fill: "#E1F5FE", stroke: "#0288D1", text: "#01579B", dot: "#0288D1" },
+  staging:           { fill: "#FFF3E0", stroke: "#F57C00", text: "#E65100", dot: "#F57C00" },
+  core:              { fill: "#E8F5E9", stroke: "#388E3C", text: "#1B5E20", dot: "#388E3C" },
+  pipeline:          { fill: "#1F1F1F", stroke: "#1F1F1F", text: "#FFFFFF", dot: "#1F1F1F" },
+  output:            { fill: "#FCE4EC", stroke: "#C2185B", text: "#880E4F", dot: "#C2185B" },
+  external:          { fill: "#EDE7F6", stroke: "#512DA8", text: "#311B92", dot: "#512DA8" },
+  delivery_internal: { fill: "#E0F2F1", stroke: "#00838F", text: "#004D40", dot: "#00838F" },
+  delivery_external: { fill: "#F3E5F5", stroke: "#7B1FA2", text: "#4A148C", dot: "#7B1FA2" },
+  unknown:           { fill: "var(--bg-sunk)", stroke: "var(--line-strong)", text: "var(--ink-3)", dot: "var(--line-strong)" },
 };
 
 const KIND_LABEL: Record<NodeKind, string> = {
   raw: "Raw", staging: "Staging", core: "Core / Integration",
-  pipeline: "Pipeline", output: "Output", external: "External", unknown: "Unknown",
+  pipeline: "Pipeline", output: "Output CSV", external: "External source",
+  delivery_internal: "Internal destination", delivery_external: "External destination",
+  unknown: "Unknown",
 };
 
 // Layer (from inventory) → NodeKind. Helps the renderer show the same colours
@@ -78,6 +84,8 @@ export function LineageView({
 
   // Render-side classifier: pipelines are first-class; otherwise map layer → kind.
   const inferKind = (fqn: string): NodeKind => {
+    if (fqn.startsWith("DELIVERY_INT.")) return "delivery_internal";
+    if (fqn.startsWith("DELIVERY_EXT.")) return "delivery_external";
     if (fqn.startsWith("PIPELINE.")) return "pipeline";
     if (fqn.startsWith("OUTPUTS.")) return "output";
     const upper = fqn.toUpperCase();
@@ -85,6 +93,22 @@ export function LineageView({
     if (last.startsWith("STG_") || last.startsWith("STAGE_")) return "staging";
     if (last.startsWith("CORE_")) return "core";
     return LAYER_TO_KIND[inferLayer(fqn)] ?? "unknown";
+  };
+
+  // Map of CSV name → DeliverySpec (lowercase keys).
+  const deliveryByCsv = useMemo(() => {
+    const m = new Map<string, NonNullable<typeof inventory>["deliveries"] extends (infer U)[] | undefined ? U : never>();
+    for (const d of inventory?.deliveries ?? []) {
+      m.set(d.csv_name.toLowerCase(), d);
+    }
+    return m;
+  }, [inventory]);
+
+  // Pretty-label for a destination node from its DeliverySpec.
+  const deliveryLabel = (csv: string): string => {
+    const d = deliveryByCsv.get(csv.toLowerCase());
+    if (!d) return csv;
+    return d.destination ?? csv;
   };
 
   // Column-level sensitivity lookup for CSV export and PII path detection
@@ -178,11 +202,34 @@ export function LineageView({
         edgeSet.set(key, { src: s, dst: t, operation: e.operation });
       }
     }
+    // Synthesise destination nodes for documented deliveries — extends the
+    // chart end-to-end (source → ETL → CSV → destination).
+    for (const d of inventory?.deliveries ?? []) {
+      // Find the output CSV node this delivery refers to (by name).
+      const csvName = d.csv_name.toLowerCase().replace(/\.csv$/, "");
+      const outputId = [...nodeSet].find((n) => {
+        if (!n.startsWith("OUTPUTS.")) return false;
+        return n.split(".").slice(1).join(".").toLowerCase() === csvName;
+      });
+      if (!outputId) continue;
+      const kindPrefix = d.kind === "external" ? "DELIVERY_EXT" : "DELIVERY_INT";
+      const destId = `${kindPrefix}.${d.csv_name}`;
+      if (pipelineFilterSet && !pipelineFilterSet.has(outputId)) continue;
+      nodeSet.add(destId);
+      const edgeKey = `${outputId}→${destId}`;
+      if (!edgeSet.has(edgeKey)) {
+        edgeSet.set(edgeKey, {
+          src: outputId, dst: destId,
+          operation: d.protocol ?? "deliver",
+        });
+      }
+    }
+
     return {
       nodes: [...nodeSet],
       edges: [...edgeSet.values()],
     };
-  }, [lineage, pipelineFilterSet]);
+  }, [lineage, pipelineFilterSet, inventory]);
 
   // Topological depth layout — every node's column = its longest path from a
   // root. Lets chains of arbitrary length flow LR without being squashed into
@@ -225,7 +272,8 @@ export function LineageView({
     // Stable sort within column: kind first (raw → staging → core → output),
     // then alphabetical, so layouts feel predictable.
     const kindOrder: Record<NodeKind, number> = {
-      external: 0, raw: 1, staging: 2, pipeline: 3, core: 4, output: 5, unknown: 6,
+      external: 0, raw: 1, staging: 2, pipeline: 3, core: 4, output: 5,
+      delivery_internal: 6, delivery_external: 7, unknown: 8,
     };
     for (const c of Object.keys(byCol)) {
       byCol[Number(c)].sort((a, b) => {
@@ -461,10 +509,8 @@ export function LineageView({
 
         <div className="eyebrow" style={{ marginTop: 28 }}>Node types</div>
         <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-          {(["raw", "staging", "core", "pipeline", "output", "external", "unknown"] as NodeKind[]).map((kind) => {
+          {(["raw", "staging", "core", "pipeline", "output", "delivery_internal", "delivery_external", "external", "unknown"] as NodeKind[]).map((kind) => {
             // Map kind back to one or more Layer ids for the existing layer-toggle state.
-            // staging/core/pipeline/output/external all gate on layer presence; we keep the
-            // simpler: toggling these hides nodes of that kind from the canvas.
             const ids: Layer[] = (
               kind === "raw" ? ["raw"] :
               kind === "staging" ? ["staging"] :
@@ -472,6 +518,8 @@ export function LineageView({
               kind === "output" ? ["output"] :
               kind === "pipeline" ? ["integration"] :
               kind === "external" ? ["unknown"] :
+              kind === "delivery_internal" ? ["unknown"] :
+              kind === "delivery_external" ? ["unknown"] :
               ["unknown"]
             );
             const checked = ids.every((i) => layers[i] !== false);
@@ -611,6 +659,7 @@ export function LineageView({
             showEdgeLabels={showEdgeLabels}
             subgraphs={subgraphs}
             nativeSize={fullscreen}
+            deliveryLabel={deliveryLabel}
           />
         </div>
       </div>
@@ -852,11 +901,13 @@ interface GraphSVGProps {
   /** When true, render at native pixel size (caller scrolls). When false,
    *  scale to fit the container via 100%/100% — the small-screen behaviour. */
   nativeSize?: boolean;
+  /** Resolves a "DELIVERY_INT.<csv>" node id back to its destination label. */
+  deliveryLabel?: (id: string) => string;
 }
 
 function GraphSVG({
   svgRef, W, H, nodes, edges, pos, inferKind, selected, focusSet, matches, layerOk, onSelect,
-  showEdgeLabels, subgraphs, nativeSize = false,
+  showEdgeLabels, subgraphs, nativeSize = false, deliveryLabel,
 }: GraphSVGProps) {
   // Compute bounding box per subgraph (with padding) so we can render the
   // chain banner behind the affected nodes.
@@ -874,6 +925,7 @@ function GraphSVG({
   }).filter(Boolean) as { output: string; label: string; nodes: string[]; x: number; y: number; w: number; h: number }[];
 
   // Operation → short edge label. Keep extract/load blank to reduce clutter.
+  // Delivery edges expose the protocol verbatim ("SFTP", "REST API", "SMTP").
   const labelFor = (op: string): string => {
     if (!op) return "";
     if (op === "extract" || op === "load" || op === "VIEW" || op === "pipeline") return "";
@@ -1023,20 +1075,24 @@ function GraphSVG({
         const isFocused = !selected || focusSet?.has(id);
         const dim = !isMatch || !isFocused || !layerOk(id);
         const isSel = selected === id;
+        const isPipeline = kind === "pipeline";
+        const isDelivery = kind === "delivery_internal" || kind === "delivery_external";
+
         let label: string;
-        if (kind === "pipeline") {
+        if (isPipeline) {
           label = id.replace(/^PIPELINE\./, "");
+        } else if (isDelivery) {
+          label = deliveryLabel ? deliveryLabel(id) : id.split(".").slice(1).join(".");
         } else if (id.startsWith("OUTPUTS.") || id.startsWith("SOURCE.")) {
           label = id.split(".").slice(1).join(".");
         } else {
           label = id.split(".").slice(-2).join(".");
         }
 
-        const isPipeline = kind === "pipeline";
-        const w = isPipeline ? 175 : 168;
+        const w = isPipeline ? 175 : isDelivery ? 200 : 168;
         const h = 30;
-        // Tables are rendered as parallelograms (data-flow symbol) — 8px slant.
-        // Pipelines are rendered as rounded rectangles (process symbol).
+        // Tables → parallelogram (data-flow). Pipelines → rounded rect (process).
+        // Delivery destinations → hexagon (external system / consumer).
         const slant = 8;
         const cx = p.x;
         const cy = p.y;
@@ -1050,6 +1106,21 @@ function GraphSVG({
             fill={c.fill}
             stroke={isSel ? "#0FB37A" : c.stroke}
             strokeWidth={isSel ? 2 : 1.5}
+          />
+        ) : isDelivery ? (
+          <polygon
+            points={[
+              `${cx - w / 2 + h / 2},${cy - h / 2}`,
+              `${cx + w / 2 - h / 2},${cy - h / 2}`,
+              `${cx + w / 2},${cy}`,
+              `${cx + w / 2 - h / 2},${cy + h / 2}`,
+              `${cx - w / 2 + h / 2},${cy + h / 2}`,
+              `${cx - w / 2},${cy}`,
+            ].join(" ")}
+            fill={c.fill}
+            stroke={isSel ? "#0FB37A" : c.stroke}
+            strokeWidth={isSel ? 2 : 1.5}
+            strokeLinejoin="round"
           />
         ) : (
           <polygon
