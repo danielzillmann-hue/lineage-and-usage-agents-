@@ -50,6 +50,22 @@ export const api = {
     `${API_BASE}/api/runs/${id}/transform/download.zip`,
 };
 
+export type ValidationIssue = {
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+  file: string;
+  detail?: string;
+};
+
+export type ValidationSummary = {
+  ok: boolean;
+  files_total: number;
+  files_failing: number;
+  errors: ValidationIssue[];
+  warnings: ValidationIssue[];
+};
+
 export type TransformResponse = {
   run_id: string;
   pipelines_generated: number;
@@ -57,6 +73,7 @@ export type TransformResponse = {
   operations_generated: number;
   files: string[];
   warnings: string[];
+  validation?: ValidationSummary | null;
 };
 
 export type TransformManifestResponse = {
@@ -67,6 +84,7 @@ export type TransformManifestResponse = {
   files: string[];
   warnings: string[];
   generated_at: string;
+  validation?: ValidationSummary | null;
 };
 
 export function streamRun(

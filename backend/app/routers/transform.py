@@ -38,6 +38,7 @@ class TransformResponse(BaseModel):
     operations_generated: int
     files: list[str]
     warnings: list[str]
+    validation: dict | None = None
 
 
 @router.post("/{run_id}/transform", response_model=TransformResponse)
@@ -94,6 +95,7 @@ async def transform_run(run_id: str) -> TransformResponse:
         operations_generated=len(project.operations),
         files=manifest.files,
         warnings=manifest.warnings,
+        validation=manifest.validation,
     )
 
 
@@ -108,6 +110,7 @@ class TransformManifestResponse(BaseModel):
     files: list[str]
     warnings: list[str]
     generated_at: str
+    validation: dict | None = None
 
 
 @router.get("/{run_id}/transform", response_model=TransformManifestResponse)

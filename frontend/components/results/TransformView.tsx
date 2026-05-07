@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Download, FileCode2, FolderTree, Play, RefreshCw, AlertTriangle } from "lucide-react";
+import { Download, FileCode2, FolderTree, Play, RefreshCw, AlertTriangle, CheckCircle2 } from "lucide-react";
 
 import { api } from "@/lib/api";
-import type { TransformManifestResponse } from "@/lib/api";
+import type { TransformManifestResponse, ValidationSummary } from "@/lib/api";
 
 // ── Visual taxonomy for the file tree ─────────────────────────────────
 //   primary    → green  (definitions/<pipeline>.sqlx — produced tables)
@@ -188,6 +188,13 @@ export function TransformView({ runId }: { runId: string }) {
           </div>
         )}
 
+        {manifest.validation && (
+          <ValidationPanel
+            validation={manifest.validation}
+            onSelectFile={setSelectedPath}
+          />
+        )}
+
         <div className="eyebrow">Files</div>
         <div style={{ marginTop: 12 }}>
           {fileGroups.map(({ dir, paths }) => (
@@ -260,6 +267,77 @@ export function TransformView({ runId }: { runId: string }) {
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+
+// ── Validation panel ─────────────────────────────────────────────────────
+
+
+function ValidationPanel({
+  validation,
+  onSelectFile,
+}: {
+  validation: ValidationSummary;
+  onSelectFile: (path: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(!validation.ok);
+  const okCount = validation.files_total - validation.files_failing;
+
+  if (validation.ok) {
+    return (
+      <div style={{
+        padding: 10, marginBottom: 16, background: "#E8F5E9",
+        borderRadius: 4, fontSize: 12, color: "#1B5E20",
+        display: "flex", alignItems: "center", gap: 8,
+      }}>
+        <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0" strokeWidth={1.5} />
+        <span>{validation.files_total} files validated · refs resolve · SQL parses</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        style={{
+          width: "100%", padding: 10, background: "var(--crit-bg)",
+          color: "var(--crit)", border: 0, borderRadius: 4,
+          fontSize: 12, textAlign: "left", cursor: "pointer",
+          display: "flex", alignItems: "center", gap: 8,
+        }}
+      >
+        <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" strokeWidth={1.5} />
+        <span>
+          {okCount}/{validation.files_total} pass — {validation.errors.length} error{validation.errors.length === 1 ? "" : "s"}
+          {validation.warnings.length > 0 && `, ${validation.warnings.length} warning${validation.warnings.length === 1 ? "" : "s"}`}
+        </span>
+        <span style={{ marginLeft: "auto", fontSize: 10 }}>{expanded ? "▾" : "▸"}</span>
+      </button>
+      {expanded && (
+        <ul style={{ listStyle: "none", padding: 0, margin: "8px 0 0", maxHeight: 320, overflowY: "auto" }}>
+          {[...validation.errors, ...validation.warnings].map((iss, i) => (
+            <li
+              key={i}
+              onClick={() => iss.file && onSelectFile(iss.file)}
+              style={{
+                padding: "6px 8px", marginBottom: 4, fontSize: 11,
+                background: iss.severity === "error" ? "var(--crit-bg)" : "var(--warn-bg)",
+                color: iss.severity === "error" ? "var(--crit)" : "var(--warn)",
+                borderRadius: 3, cursor: iss.file ? "pointer" : "default",
+              }}
+              title={iss.detail}
+            >
+              <div className="mono" style={{ fontSize: 10, opacity: 0.8 }}>
+                {iss.code} · {iss.file.split("/").pop()}
+              </div>
+              <div>{iss.message}</div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

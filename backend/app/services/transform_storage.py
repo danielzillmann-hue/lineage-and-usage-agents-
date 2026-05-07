@@ -28,6 +28,7 @@ class TransformManifest:
     files: list[str]                 # all file paths in the project
     warnings: list[str]
     generated_at: str                # ISO timestamp
+    validation: dict | None = None   # {ok, files_total, files_failing, errors:[...], warnings:[...]}
 
 
 def _prefix(run_id: str) -> str:
@@ -55,6 +56,7 @@ def upload_project(run_id: str, project: AssembledProject) -> TransformManifest:
         files=sorted(project.files.keys()),
         warnings=list(project.warnings),
         generated_at=datetime.now(timezone.utc).isoformat(),
+        validation=project.validation,
     )
     gcs.write_json(
         bucket,

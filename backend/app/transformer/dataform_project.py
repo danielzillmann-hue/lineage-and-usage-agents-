@@ -42,6 +42,7 @@ class AssembledProject:
     pipelines: list[str] = field(default_factory=list)   # primary table names produced
     operations: list[str] = field(default_factory=list)  # post-load ops emitted
     warnings: list[str] = field(default_factory=list)
+    validation: dict | None = None                       # optional validation summary
 
 
 # Match `${ref('table_name')}` and `${ref("table_name")}` calls.
@@ -93,10 +94,41 @@ def assemble_project(
     # 4. Project-level workflow_settings.yaml.
     out.files["workflow_settings.yaml"] = _build_workflow_settings(config)
 
-    # 5. Top-level README.
+    # 5. Validation pass — runs on every assembled project. The full
+    # generated file list (including the just-built sources.sqlx) flows
+    # through so cross-file checks like ref resolution see everything.
+    from app.transformer.runner import GeneratedFile  # local: avoid cycle
+    from app.transformer.validation import validate_project
+    full_files = list(generated)
+    if "definitions/sources.sqlx" in out.files:
+        full_files.append(GeneratedFile(
+            path="definitions/sources.sqlx",
+            content=out.files["definitions/sources.sqlx"],
+            pipeline="(sources)",
+            kind="sources",
+            warnings=[],
+        ))
+    validation = validate_project(full_files)
+    out.validation = {
+        **validation.summary(),
+        "errors": [_issue_dict(i) for i in validation.errors],
+        "warnings": [_issue_dict(i) for i in validation.warnings],
+    }
+
+    # 6. Top-level README — written last so it can include validation info.
     out.files["README.md"] = _build_readme(out, config)
 
     return out
+
+
+def _issue_dict(issue) -> dict:
+    return {
+        "severity": issue.severity,
+        "code": issue.code,
+        "message": issue.message,
+        "file": issue.file_path,
+        "detail": issue.detail or "",
+    }
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────
@@ -206,6 +238,34 @@ def _build_readme(project: AssembledProject, config: DataformProjectConfig) -> s
     source_lines = "\n".join(f"- `{s}`" for s in project.sources) or "_(none — all references resolve internally)_"
     op_lines = "\n".join(f"- `definitions/operations/{o}.sqlx`" for o in sorted(project.operations)) or "_(none)_"
 
+    # Validation summary block — shown if validation ran.
+    validation_section = ""
+    if project.validation:
+        v = project.validation
+        if v.get("ok"):
+            validation_section = (
+                f"\n## Validation\n\n"
+                f"All {v['files_total']} files passed structural validation "
+                f"(refs resolve, SQL parses, no cycles).\n"
+            )
+        else:
+            err_lines = "\n".join(
+                f"- **{e['code']}** in `{e['file']}`: {e['message']}"
+                + (f"\n  - {e['detail']}" if e.get("detail") else "")
+                for e in v.get("errors", [])[:20]
+            )
+            warn_lines = "\n".join(
+                f"- **{w['code']}** in `{w['file']}`: {w['message']}"
+                for w in v.get("warnings", [])[:20]
+            )
+            validation_section = (
+                f"\n## Validation\n\n"
+                f"{v['files_failing']} of {v['files_total']} files failed "
+                f"structural checks ({v['errors']} errors, {v['warnings']} warnings).\n"
+                + (f"\n### Errors\n\n{err_lines}\n" if err_lines else "")
+                + (f"\n### Warnings\n\n{warn_lines}\n" if warn_lines else "")
+            )
+
     return (
         f"# Insignia migration — generated Dataform project\n\n"
         f"This repo was generated automatically from Oracle pipeline XMLs by the\n"
@@ -230,7 +290,8 @@ def _build_readme(project: AssembledProject, config: DataformProjectConfig) -> s
         f"pipelines run. They're declared (not built) by Dataform.\n\n"
         f"{source_lines}\n\n"
         f"## Post-load operations ({len(project.operations)})\n\n"
-        f"{op_lines}\n\n"
+        f"{op_lines}\n"
+        f"{validation_section}\n"
         f"## Running\n\n"
         f"```bash\n"
         f"dataform compile\n"

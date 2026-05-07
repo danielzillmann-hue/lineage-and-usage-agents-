@@ -75,6 +75,19 @@ async def run(req: RunRequest, results, emit: EmitFn, run_id: str) -> None:
                     f"{len(project.operations)} operations scripts "
                     f"({len(project.files)} files total)")
 
+    # Surface validation results — usually catches structural issues
+    # before users hit them in `dataform compile`.
+    if project.validation:
+        v = project.validation
+        if v.get("ok"):
+            await log_event(emit, AgentName.TRANSFORM,
+                            f"validation passed: {v['files_total']} files, "
+                            f"all refs resolve, all SQL parses, no cycles")
+        else:
+            await log_event(emit, AgentName.TRANSFORM,
+                            f"validation: {v['files_failing']} of {v['files_total']} "
+                            f"files have issues — {v['errors']} errors, {v['warnings']} warnings")
+
     manifest = transform_storage.upload_project(run_id, project)
 
     last_result = {
