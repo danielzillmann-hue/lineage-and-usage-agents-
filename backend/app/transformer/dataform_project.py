@@ -132,6 +132,29 @@ def assemble_project(
         )
         out.sources = sources
 
+        # Raw-layer bootstrap: BQ DDL + replication README. Closes the
+        # loop so users see how to populate the raw dataset our pipelines
+        # read from. Only emitted when at least one source has inventory
+        # column-level schema info.
+        from app.transformer.raw_bootstrap import (
+            generate_raw_schema_sql,
+            generate_replication_readme,
+        )
+        any_with_schema = any(
+            (table_metadata.get(s.lower(), {}).get("schema") or [])
+            for s in sources
+        )
+        if any_with_schema:
+            out.files["bootstrap/raw_schema.sql"] = generate_raw_schema_sql(
+                sources, table_metadata,
+                project=config.gcp_project, dataset=config.source_dataset,
+            )
+            out.files["bootstrap/replication_setup.md"] = generate_replication_readme(
+                sources,
+                project=config.gcp_project, dataset=config.source_dataset,
+                region=config.location,
+            )
+
     # 4. Project-level workflow_settings.yaml.
     out.files["workflow_settings.yaml"] = _build_workflow_settings(config)
 

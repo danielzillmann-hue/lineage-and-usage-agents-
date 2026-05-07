@@ -182,9 +182,16 @@ def _extract_procedures(results) -> list[tuple[str, str, str]]:
 
 
 def _extract_table_metadata(results) -> dict[str, dict]:
-    """Pull PK / non-null info from the inventory, keyed by lowercase table name.
+    """Pull PK / non-null / full column schema from the inventory, keyed
+    by lowercase table name.
 
-    Each entry: {"primary_keys": ["col1"], "non_null": ["col1", "col2"]}
+    Each entry: {
+        "primary_keys": ["col1"],
+        "non_null": ["col1", "col2"],
+        "schema": [{"name", "oracle_type", "nullable", "is_pk"}, ...],
+    }
+    The `schema` field powers raw-layer DDL bootstrap; PK/non-null power
+    Dataform assertions.
     """
     inv = getattr(results, "inventory", None)
     if inv is None:
@@ -192,9 +199,20 @@ def _extract_table_metadata(results) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for t in getattr(inv, "tables", []) or []:
         cols = getattr(t, "columns", []) or []
-        pks = [c.name for c in cols if getattr(c, "is_pk", False)]
-        non_null = [c.name for c in cols if not getattr(c, "nullable", True)]
-        if not pks and not non_null:
+        if not cols:
             continue
-        out[t.name.lower()] = {"primary_keys": pks, "non_null": non_null}
+        schema = [
+            {
+                "name": c.name,
+                "oracle_type": getattr(c, "data_type", "") or "",
+                "nullable": getattr(c, "nullable", True),
+                "is_pk": getattr(c, "is_pk", False),
+            }
+            for c in cols
+        ]
+        out[t.name.lower()] = {
+            "primary_keys": [c["name"] for c in schema if c["is_pk"]],
+            "non_null": [c["name"] for c in schema if not c["nullable"]],
+            "schema": schema,
+        }
     return out

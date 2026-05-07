@@ -76,9 +76,10 @@ async def transform_run(run_id: str) -> TransformResponse:
     if not xml_files:
         raise HTTPException(400, "no pipeline XMLs found in the run's source bucket")
 
-    # Pull view source SQL + PK/non-null metadata from the saved inventory
-    # results so source declarations for views render as `type: "view"`
-    # and assertions are emitted on every table we have PK info for.
+    # Pull view source SQL + full column metadata from the saved inventory
+    # results so source declarations for views render as `type: "view"`,
+    # assertions are emitted on every table with PK info, and the raw-
+    # layer bootstrap (DDL + replication README) gets generated.
     views: dict[str, str] = {}
     table_metadata: dict[str, dict] = {}
     try:
@@ -87,13 +88,22 @@ async def transform_run(run_id: str) -> TransformResponse:
             for t in results.inventory.tables:
                 if t.kind == "VIEW" and t.source_text:
                     views[t.name.lower()] = t.source_text
-                pks = [c.name for c in t.columns if c.is_pk]
-                non_null = [c.name for c in t.columns if not c.nullable]
-                if pks or non_null:
-                    table_metadata[t.name.lower()] = {
-                        "primary_keys": pks,
-                        "non_null": non_null,
+                if not t.columns:
+                    continue
+                schema = [
+                    {
+                        "name": c.name,
+                        "oracle_type": c.data_type or "",
+                        "nullable": c.nullable,
+                        "is_pk": c.is_pk,
                     }
+                    for c in t.columns
+                ]
+                table_metadata[t.name.lower()] = {
+                    "primary_keys": [c["name"] for c in schema if c["is_pk"]],
+                    "non_null": [c["name"] for c in schema if not c["nullable"]],
+                    "schema": schema,
+                }
     except Exception as e:  # noqa: BLE001
         log.warning("failed to load inventory metadata for run %s: %s", run_id, e)
 
