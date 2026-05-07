@@ -72,20 +72,28 @@ async def transform_run(run_id: str) -> TransformResponse:
     if not xml_files:
         raise HTTPException(400, "no pipeline XMLs found in the run's source bucket")
 
-    # Pull view source SQL from the saved inventory results so source
-    # declarations for views render as `type: "view"` with the original
-    # body instead of opaque `type: "declaration"` pointers.
+    # Pull view source SQL + PK/non-null metadata from the saved inventory
+    # results so source declarations for views render as `type: "view"`
+    # and assertions are emitted on every table we have PK info for.
     views: dict[str, str] = {}
+    table_metadata: dict[str, dict] = {}
     try:
         results = await store.get_results(run_id)
         if results and results.inventory:
             for t in results.inventory.tables:
                 if t.kind == "VIEW" and t.source_text:
                     views[t.name.lower()] = t.source_text
+                pks = [c.name for c in t.columns if c.is_pk]
+                non_null = [c.name for c in t.columns if not c.nullable]
+                if pks or non_null:
+                    table_metadata[t.name.lower()] = {
+                        "primary_keys": pks,
+                        "non_null": non_null,
+                    }
     except Exception as e:  # noqa: BLE001
-        log.warning("failed to load inventory views for run %s: %s", run_id, e)
+        log.warning("failed to load inventory metadata for run %s: %s", run_id, e)
 
-    project = generate_project(xml_files, views=views)
+    project = generate_project(xml_files, views=views, table_metadata=table_metadata)
     manifest = transform_storage.upload_project(run_id, project)
 
     return TransformResponse(

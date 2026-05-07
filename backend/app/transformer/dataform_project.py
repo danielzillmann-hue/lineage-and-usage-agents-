@@ -57,6 +57,7 @@ def assemble_project(
     generated: list[GeneratedFile],
     config: DataformProjectConfig | None = None,
     views: dict[str, str] | None = None,
+    table_metadata: dict[str, dict] | None = None,
 ) -> AssembledProject:
     """Bundle generated SQLX into a deployable Dataform project.
 
@@ -64,14 +65,28 @@ def assemble_project(
     When provided, source declarations for matching tables are upgraded
     from `type: "declaration"` to `type: "view"` with the original SQL
     body (translated to BigQuery dialect).
+
+    `table_metadata` is an optional dict of
+    `{lowercase_table_name: {"primary_keys": [...], "non_null": [...]}}`.
+    When provided, assertions blocks are emitted on source declarations
+    and primary SQLX files so Dataform validates uniqueness + nonNull
+    automatically.
     """
     config = config or DataformProjectConfig()
     views = views or {}
+    table_metadata = table_metadata or {}
     out = AssembledProject()
 
     # 1. Pass-through every generated SQLX into the project tree, plus
     # the matching original-source files so the UI can render side-by-side.
+    # Primary SQLX files get an `assertions` config block injected when
+    # we have inventory metadata for the target table.
     for gf in generated:
+        if gf.kind == "primary" and table_metadata:
+            target = gf.path.split("/")[-1].removesuffix(".sqlx").lower()
+            asserts = _assertions_for(target, table_metadata)
+            if asserts:
+                gf.content = _inject_assertions_into_sqlx(gf.content, asserts)
         out.files[gf.path] = gf.content
         if gf.kind == "primary":
             # File stem == the actual produced table name. Multi-stage
@@ -103,9 +118,12 @@ def assemble_project(
     sources = sorted(refs - produced)
 
     # 3. Generate sources.sqlx — declarations for raw tables, view bodies
-    # for known views.
+    # for known views. Declarations get assertions when we have inventory
+    # metadata for the named source.
     if sources:
-        out.files["definitions/sources.sqlx"] = _build_sources_sqlx(sources, config, views)
+        out.files["definitions/sources.sqlx"] = _build_sources_sqlx(
+            sources, config, views, table_metadata
+        )
         out.sources = sources
 
     # 4. Project-level workflow_settings.yaml.
@@ -192,12 +210,14 @@ def _build_sources_sqlx(
     sources: list[str],
     config: DataformProjectConfig,
     views: dict[str, str],
+    table_metadata: dict[str, dict],
 ) -> str:
     """Sources file. Each external name renders as either:
     - `type: "view"` with the original (translated) SQL body, when the
       name matches a view from the inventory.
     - `type: "declaration"` otherwise — pure pointer to the BQ table
-      replicated from Oracle.
+      replicated from Oracle, with `assertions` injected for known PKs
+      and NOT NULL columns.
     """
     blocks: list[str] = []
     for s in sources:
@@ -205,25 +225,79 @@ def _build_sources_sqlx(
         if view_sql:
             blocks.append(_view_block(s, view_sql))
         else:
-            blocks.append(_declaration_block(s, config))
+            blocks.append(_declaration_block(s, config, table_metadata.get(s.lower())))
     return (
         "-- Sources — declarations for raw replicated tables, plus full\n"
         "-- view definitions for any Oracle views the pipelines read from.\n"
         "-- Declarations are pointers (no compile-time SQL); views are\n"
-        "-- materialised by Dataform from the original SQL body.\n\n"
+        "-- materialised by Dataform from the original SQL body. Each\n"
+        "-- includes an `assertions` block for known PKs / NOT NULL\n"
+        "-- columns inferred from the Oracle inventory.\n\n"
         + "\n\n".join(blocks)
         + "\n"
     )
 
 
-def _declaration_block(name: str, config: DataformProjectConfig) -> str:
+def _declaration_block(
+    name: str,
+    config: DataformProjectConfig,
+    metadata: dict | None = None,
+) -> str:
+    asserts_block = ""
+    if metadata:
+        body = _assertions_body(metadata)
+        if body:
+            asserts_block = f"\n  assertions: {{\n{body}\n  }},"
     return f"""config {{
   type: "declaration",
   database: "{config.gcp_project}",
   schema: "{config.source_dataset}",
   name: "{name}",
-  description: "Source table replicated from the Oracle warehouse.",
+  description: "Source table replicated from the Oracle warehouse.",{asserts_block}
 }}"""
+
+
+# ─── Assertion helpers ──────────────────────────────────────────────────
+
+
+def _assertions_for(table_name: str, table_metadata: dict[str, dict]) -> dict | None:
+    """Look up assertion fields for a generated table by name (case-insensitive)."""
+    return table_metadata.get(table_name.lower())
+
+
+def _assertions_body(metadata: dict) -> str:
+    """Build the JS-object body of an `assertions: { ... }` block."""
+    pieces: list[str] = []
+    pks = metadata.get("primary_keys") or []
+    if pks:
+        pks_str = ", ".join(f'"{c}"' for c in pks)
+        pieces.append(f"    uniqueKey: [{pks_str}],")
+    non_null = metadata.get("non_null") or []
+    if non_null:
+        nn_str = ", ".join(f'"{c}"' for c in non_null)
+        pieces.append(f"    nonNull: [{nn_str}],")
+    return "\n".join(pieces)
+
+
+def _inject_assertions_into_sqlx(sqlx: str, metadata: dict) -> str:
+    """Insert an `assertions: { ... }` field into a wrap_sqlx-generated
+    config block. Idempotent — if assertions already exist, leaves the
+    file alone."""
+    body = _assertions_body(metadata)
+    if not body or "assertions:" in sqlx:
+        return sqlx
+    # Find the closing `}` of the first config block. wrap_sqlx outputs
+    # the block as `config {\n  ...\n}` starting at column 0.
+    cfg_start = sqlx.find("config {")
+    if cfg_start < 0:
+        return sqlx
+    # Find the matching close brace at column 0 (config blocks have no
+    # nested `}` at column 0 in our wrapper output).
+    close_idx = sqlx.find("\n}", cfg_start)
+    if close_idx < 0:
+        return sqlx
+    insertion = f"  assertions: {{\n{body}\n  }},\n"
+    return sqlx[:close_idx + 1] + insertion + sqlx[close_idx + 1:]
 
 
 def _view_block(name: str, oracle_sql: str) -> str:

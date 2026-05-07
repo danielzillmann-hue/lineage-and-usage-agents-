@@ -227,6 +227,7 @@ export function TransformView({ runId }: { runId: string }) {
   const [splitView, setSplitView] = useState(false);
   const [pushModalOpen, setPushModalOpen] = useState(false);
   const [pushResult, setPushResult] = useState<PushResultResponse | null>(null);
+  const [reviewOnly, setReviewOnly] = useState(false);
 
   // Initial manifest fetch — 404 is expected if the user hasn't generated yet.
   useEffect(() => {
@@ -282,11 +283,15 @@ export function TransformView({ runId }: { runId: string }) {
     }
   };
 
-  // Group files by directory for tree rendering
+  // Group files by directory for tree rendering. When `reviewOnly` is on,
+  // filter to only files with confidence < 70 (the manual-review queue).
   const fileGroups = useMemo(() => {
     if (!manifest) return [];
+    const visibleFiles = reviewOnly
+      ? manifest.files.filter((p) => (manifest.file_meta?.[p]?.confidence ?? 100) < 70)
+      : manifest.files;
     const groups: Record<string, string[]> = {};
-    for (const path of manifest.files) {
+    for (const path of visibleFiles) {
       const parts = path.split("/");
       const dir = parts.length > 1 ? parts.slice(0, -1).join("/") : "(root)";
       (groups[dir] ??= []).push(path);
@@ -294,6 +299,11 @@ export function TransformView({ runId }: { runId: string }) {
     return Object.entries(groups)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([dir, paths]) => ({ dir, paths: paths.sort() }));
+  }, [manifest, reviewOnly]);
+
+  const reviewQueueCount = useMemo(() => {
+    if (!manifest?.file_meta) return 0;
+    return Object.values(manifest.file_meta).filter((m) => (m?.confidence ?? 100) < 70).length;
   }, [manifest]);
 
   // ── Empty state ─────────────────────────────────────────────────────
@@ -435,7 +445,24 @@ export function TransformView({ runId }: { runId: string }) {
           />
         )}
 
-        <div className="eyebrow">Files</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div className="eyebrow">Files</div>
+          {reviewQueueCount > 0 && (
+            <button
+              onClick={() => setReviewOnly((v) => !v)}
+              title="Show only files with confidence < 70 (manual review queue)"
+              style={{
+                fontSize: 10.5, padding: "2px 8px",
+                background: reviewOnly ? "#FFEBEE" : "transparent",
+                color: reviewOnly ? "#B71C1C" : "var(--ink-3)",
+                border: `1px solid ${reviewOnly ? "#B71C1C" : "var(--line)"}`,
+                borderRadius: 99, cursor: "pointer", fontFamily: "var(--font-mono)",
+              }}
+            >
+              {reviewOnly ? "showing review only" : `review queue (${reviewQueueCount})`}
+            </button>
+          )}
+        </div>
         <div style={{ marginTop: 12 }}>
           {fileGroups.map(({ dir, paths }) => (
             <div key={dir} style={{ marginBottom: 12 }}>

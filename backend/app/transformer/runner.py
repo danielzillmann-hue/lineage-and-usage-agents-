@@ -105,6 +105,7 @@ def generate_project(
     xml_files: list[tuple[str, str]],
     config: DataformProjectConfig | None = None,
     views: dict[str, str] | None = None,
+    table_metadata: dict[str, dict] | None = None,
 ) -> AssembledProject:
     """End-to-end: pipeline XMLs → complete Dataform project.
 
@@ -115,9 +116,12 @@ def generate_project(
     `views` is an optional dict of `{lowercase_view_name: oracle_view_sql}`
     plumbed through to assemble_project so source declarations for known
     views are upgraded to `type: "view"` with the original SQL body.
+
+    `table_metadata` is an optional dict of inventory table info
+    (PKs, non-null columns) used to inject Dataform `assertions` blocks.
     """
     files = generate_sqlx(xml_files)
-    return assemble_project(files, config, views=views)
+    return assemble_project(files, config, views=views, table_metadata=table_metadata)
 
 
 def _wrap_operations(op: OperationsScript) -> str:

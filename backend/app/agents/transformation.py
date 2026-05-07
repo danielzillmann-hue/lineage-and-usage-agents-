@@ -67,7 +67,15 @@ async def run(req: RunRequest, results, emit: EmitFn, run_id: str) -> None:
         await log_event(emit, AgentName.TRANSFORM,
                         f"found {len(views)} Oracle views with source SQL — porting as type:view")
 
-    project = generate_project(xml_files, views=views)
+    # Pull PK / non-null info so Dataform assertions can be auto-emitted
+    # against source declarations and primary tables.
+    table_metadata = _extract_table_metadata(results)
+    if table_metadata:
+        with_keys = sum(1 for m in table_metadata.values() if m.get("primary_keys"))
+        await log_event(emit, AgentName.TRANSFORM,
+                        f"inventory metadata for {len(table_metadata)} tables ({with_keys} with PKs) — generating assertions")
+
+    project = generate_project(xml_files, views=views, table_metadata=table_metadata)
 
     await log_event(emit, AgentName.TRANSFORM,
                     f"generated {len(project.pipelines)} pipelines, "
@@ -127,4 +135,23 @@ def _extract_views(results) -> dict[str, str]:
         if not sql:
             continue
         out[t.name.lower()] = sql
+    return out
+
+
+def _extract_table_metadata(results) -> dict[str, dict]:
+    """Pull PK / non-null info from the inventory, keyed by lowercase table name.
+
+    Each entry: {"primary_keys": ["col1"], "non_null": ["col1", "col2"]}
+    """
+    inv = getattr(results, "inventory", None)
+    if inv is None:
+        return {}
+    out: dict[str, dict] = {}
+    for t in getattr(inv, "tables", []) or []:
+        cols = getattr(t, "columns", []) or []
+        pks = [c.name for c in cols if getattr(c, "is_pk", False)]
+        non_null = [c.name for c in cols if not getattr(c, "nullable", True)]
+        if not pks and not non_null:
+            continue
+        out[t.name.lower()] = {"primary_keys": pks, "non_null": non_null}
     return out

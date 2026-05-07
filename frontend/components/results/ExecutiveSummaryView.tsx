@@ -25,6 +25,18 @@ export function ExecutiveSummaryView({ results }: { results: RunResults }) {
   const critFindings = sum?.findings.filter((f) => f.severity === "critical").length ?? 0;
   const warnFindings = sum?.findings.filter((f) => f.severity === "warn").length ?? 0;
 
+  // ROI estimate: industry rule-of-thumb is 5-10 days of senior consultant
+  // time per pipeline migration (write + test + integrate); procedures are
+  // smaller. AI-accelerated runs typically need only review + edge-case
+  // adjustment, ~0.5 days per pipeline + 1 day per procedure.
+  const pipelineCount = inv?.pipelines.length ?? 0;
+  const manualDays = pipelineCount * 7 + procCount * 5;
+  const acceleratedDays = pipelineCount * 0.5 + procCount * 1;
+  const daysSaved = Math.max(0, manualDays - acceleratedDays);
+  const dailyRate = 1800; // AUD blended senior data engineer rate
+  const dollarsSaved = daysSaved * dailyRate;
+  const speedupFactor = acceleratedDays > 0 ? manualDays / acceleratedDays : 0;
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -33,6 +45,45 @@ export function ExecutiveSummaryView({ results }: { results: RunResults }) {
         <MetricCard label="Reporting-reachable" value={`${reachPct.toFixed(0)}%`} sub={`${reachable} of ${reachable + unreachable} raw sources`} icon={Activity} tint="from-[#00b4f0] to-[#18c29c]" />
         <MetricCard label="Findings" value={formatNumber((sum?.findings.length) ?? 0)} sub={`${critFindings} critical · ${warnFindings} warn`} icon={AlertTriangle} tint="from-[#ff6b47] to-[#f6b400]" />
       </div>
+
+      {pipelineCount + procCount > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Migration ROI</CardTitle>
+            <CardDescription>
+              Estimated speedup vs a manual port, using industry rule-of-thumb effort per
+              pipeline (≈7 days) and procedure (≈5 days), and an AUD 1,800/day senior data
+              engineer rate. Adjust below the headline.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <RoiStat
+                label="Migration timeline"
+                value={`${Math.ceil(manualDays / 5)} weeks → ${Math.max(1, Math.ceil(acceleratedDays / 5))} weeks`}
+                sub={`manual · ${manualDays.toFixed(0)}d  →  agents · ${acceleratedDays.toFixed(0)}d`}
+              />
+              <RoiStat
+                label="Effort saved"
+                value={`${daysSaved.toFixed(0)} days`}
+                sub={`${speedupFactor.toFixed(1)}× faster`}
+              />
+              <RoiStat
+                label="Cost saved"
+                value={`$${(dollarsSaved / 1000).toFixed(0)}k`}
+                sub={`@ AUD ${dailyRate.toLocaleString()}/day`}
+                emphasised
+              />
+            </div>
+            <div className="mt-3 text-[12px] text-[var(--ink-3)] leading-relaxed">
+              Based on {pipelineCount} pipelines and {procCount} procedures discovered by
+              the inventory agent. Assumes a single senior data engineer; parallelism
+              reduces wall-clock further. Excludes business-validation, UAT, and
+              decommission work — those scale with table count regardless of automation.
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {sum && (
         <Card>
@@ -115,5 +166,36 @@ function DistributionCard({ title, count, description, icon: Icon, tint }: {
         <div className="mt-1 text-[11.5px] text-[var(--color-fg-muted)]">{description}</div>
       </CardContent>
     </Card>
+  );
+}
+
+function RoiStat({
+  label, value, sub, emphasised = false,
+}: {
+  label: string; value: string; sub: string; emphasised?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        padding: 16,
+        background: emphasised ? "#E8F5E9" : "var(--bg-elev)",
+        border: `1px solid ${emphasised ? "#388E3C" : "var(--line)"}`,
+        borderRadius: 6,
+      }}
+    >
+      <div className="text-[11.5px] uppercase tracking-wider text-[var(--color-fg-subtle)]">{label}</div>
+      <div
+        className="tabular-nums"
+        style={{
+          fontSize: 22,
+          fontWeight: 600,
+          color: emphasised ? "#1B5E20" : "var(--ink)",
+          marginTop: 4,
+        }}
+      >
+        {value}
+      </div>
+      <div className="text-[11.5px] text-[var(--color-fg-muted)] mt-0.5">{sub}</div>
+    </div>
   );
 }
