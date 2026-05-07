@@ -92,6 +92,19 @@ def _trim_inventory(inv: dict) -> dict:
 
 @router.post("/{run_id}/chat", response_model=ChatResponse)
 async def chat(run_id: str, body: ChatRequest) -> ChatResponse:
+    try:
+        return await _chat_impl(run_id, body)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        log.exception("chat: unhandled error for run %s", run_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"chat failed: {type(e).__name__}: {e}",
+        ) from e
+
+
+async def _chat_impl(run_id: str, body: ChatRequest) -> ChatResponse:
     run = await store.get_run(run_id)
     if run is None:
         raise HTTPException(404, f"run {run_id} not found")
