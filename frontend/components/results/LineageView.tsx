@@ -188,7 +188,9 @@ export function LineageView({
   // root. Lets chains of arbitrary length flow LR without being squashed into
   // 4 fixed columns; pipelines naturally sit between their inputs and outputs.
   const layout = useMemo(() => {
-    const W = 1400;
+    // Fullscreen renders at native size: scale up the canvas so columns spread
+    // out and labels are comfortably readable. Non-fullscreen scales to fit.
+    const W = fullscreen ? 2200 : 1400;
     const adj = new Map<string, string[]>();   // node → downstream
     const rev = new Map<string, string[]>();   // node → upstream
     for (const e of edges) {
@@ -243,11 +245,11 @@ export function LineageView({
       colCount === 1 ? W / 2 : COL_PAD_LEFT + (i * usableW) / (colCount - 1),
     );
 
-    // Vertical spacing: at least 60px between nodes; canvas height adapts to the tallest column.
-    const ROW_H = 60;
+    // Vertical spacing — bigger in fullscreen so labels are readable.
+    const ROW_H = fullscreen ? 80 : 60;
     const TOP_PAD = 64;
     const tallest = Math.max(...cols.map((c) => byCol[c].length), 1);
-    const H = Math.max(560, TOP_PAD + 40 + tallest * ROW_H);
+    const H = Math.max(fullscreen ? 880 : 560, TOP_PAD + 40 + tallest * ROW_H);
 
     const pos: Record<string, { x: number; y: number; col: number }> = {};
     cols.forEach((c, i) => {
@@ -260,7 +262,7 @@ export function LineageView({
     });
 
     return { W, H, pos, colXs, cols };
-  }, [nodes, edges]);
+  }, [nodes, edges, fullscreen]);
 
   // Filter logic
   const matches = (id: string) => !search || id.toLowerCase().includes(search.toLowerCase());
@@ -605,6 +607,7 @@ export function LineageView({
             onSelect={(id) => setSelected((s) => (s === id ? null : id))}
             showEdgeLabels={showEdgeLabels}
             subgraphs={subgraphs}
+            nativeSize={fullscreen}
           />
         </div>
       </div>
@@ -843,11 +846,14 @@ interface GraphSVGProps {
   onSelect: (id: string) => void;
   showEdgeLabels: boolean;
   subgraphs: { output: string; label: string; nodes: string[] }[];
+  /** When true, render at native pixel size (caller scrolls). When false,
+   *  scale to fit the container via 100%/100% — the small-screen behaviour. */
+  nativeSize?: boolean;
 }
 
 function GraphSVG({
   svgRef, W, H, nodes, edges, pos, inferKind, selected, focusSet, matches, layerOk, onSelect,
-  showEdgeLabels, subgraphs,
+  showEdgeLabels, subgraphs, nativeSize = false,
 }: GraphSVGProps) {
   // Compute bounding box per subgraph (with padding) so we can render the
   // chain banner behind the affected nodes.
@@ -877,7 +883,13 @@ function GraphSVG({
       ref={svgRef}
       xmlns="http://www.w3.org/2000/svg"
       viewBox={`0 0 ${W} ${H}`}
-      style={{ width: "100%", height: "100%", display: "block" }}
+      width={nativeSize ? W : undefined}
+      height={nativeSize ? H : undefined}
+      style={{
+        width: nativeSize ? `${W}px` : "100%",
+        height: nativeSize ? `${H}px` : "100%",
+        display: "block",
+      }}
     >
       <defs>
         <pattern id="dotgrid" width="24" height="24" patternUnits="userSpaceOnUse">
