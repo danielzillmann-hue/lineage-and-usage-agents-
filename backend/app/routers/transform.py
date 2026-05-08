@@ -253,6 +253,19 @@ def orchestrate_run(run_id: str) -> OrchestrationResponse:
     already-generated transform output. Used when the run was created
     before the orchestration agent existed, or to refresh the workflow.
     """
+    try:
+        return _orchestrate_impl(run_id)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        log.exception("orchestrate failed for run %s", run_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"orchestrate failed: {type(e).__name__}: {e}",
+        ) from e
+
+
+def _orchestrate_impl(run_id: str) -> OrchestrationResponse:
     manifest = transform_storage.read_manifest(run_id)
     if manifest is None:
         raise HTTPException(404, f"no transform output for run {run_id} — generate it first")
@@ -280,15 +293,16 @@ def orchestrate_run(run_id: str) -> OrchestrationResponse:
         "confidence": 100,
         "original_path": "",
     }
-    manifest_dict = {
-        **manifest.__dict__,
-        "orchestration": {
-            "kind": "github_actions",
-            "files": [target_path],
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        },
+    manifest.orchestration = {
+        "kind": "github_actions",
+        "files": [target_path],
+        "generated_at": datetime.now(timezone.utc).isoformat(),
     }
-    gcs.write_json(bucket, f"{prefix}/_manifest.json", json.dumps(manifest_dict, indent=2))
+    gcs.write_json(
+        bucket,
+        f"{prefix}/_manifest.json",
+        json.dumps(manifest.__dict__, indent=2),
+    )
 
     return OrchestrationResponse(
         run_id=run_id,

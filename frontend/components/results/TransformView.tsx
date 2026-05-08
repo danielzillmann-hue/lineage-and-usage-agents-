@@ -386,6 +386,20 @@ export function TransformView({ runId }: { runId: string }) {
           onSuccess={(r) => { setPushResult(r); setPushModalOpen(false); }}
         />
       )}
+      {error && (
+        <div
+          onClick={() => setError(null)}
+          style={{
+            position: "fixed", top: 16, right: 16, zIndex: 100,
+            padding: "10px 14px", background: "var(--crit-bg)", color: "var(--crit)",
+            border: "1px solid var(--crit)", borderRadius: 6, fontSize: 12.5,
+            cursor: "pointer", maxWidth: 480,
+          }}
+        >
+          <AlertTriangle className="h-3.5 w-3.5 inline mr-2" strokeWidth={1.5} />
+          {error}
+        </div>
+      )}
       {pushResult && (
         <div
           onClick={() => setPushResult(null)}

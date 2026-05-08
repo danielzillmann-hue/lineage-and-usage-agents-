@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 
 from app.config import get_settings
@@ -30,6 +30,7 @@ class TransformManifest:
     generated_at: str                # ISO timestamp
     validation: dict | None = None   # {ok, files_total, files_failing, errors:[...], warnings:[...]}
     file_meta: dict[str, dict] = field(default_factory=dict)  # path → {confidence, kind, original_path, pipeline}
+    orchestration: dict | None = None  # set by the orchestration agent / endpoint
 
 
 def _prefix(run_id: str) -> str:
@@ -73,7 +74,12 @@ def upload_project(run_id: str, project: AssembledProject) -> TransformManifest:
 
 
 def read_manifest(run_id: str) -> TransformManifest | None:
-    """Load the previously-written manifest, or None if no transform run exists."""
+    """Load the previously-written manifest, or None if no transform run exists.
+
+    Tolerates extra keys in the saved JSON (so manifests written by older
+    code with fields the dataclass no longer declares don't crash the
+    read).
+    """
     settings = get_settings()
     try:
         text = gcs.read_text(settings.results_bucket, f"{_prefix(run_id)}/_manifest.json")
@@ -83,7 +89,9 @@ def read_manifest(run_id: str) -> TransformManifest | None:
         d = json.loads(text)
     except Exception:
         return None
-    return TransformManifest(**d)
+    known = {f.name for f in fields(TransformManifest)}
+    filtered = {k: v for k, v in d.items() if k in known}
+    return TransformManifest(**filtered)
 
 
 def read_file(run_id: str, path: str) -> str | None:
