@@ -242,33 +242,10 @@ export function SetupForm() {
                   }}
                 >
                   {SOURCE_TYPES.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}{s.status === "beta" ? "  (Beta)" : ""}
-                    </option>
+                    <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
                 </select>
-                {isBeta && (
-                  <span
-                    className="mono"
-                    title="Connectors for non-Oracle sources are in private beta. Contact intelia for access."
-                    style={{
-                      fontSize: 10.5, padding: "4px 10px",
-                      background: "#FFF3E0", color: "#E65100",
-                      border: "1px solid #F57C00", borderRadius: 99,
-                      flexShrink: 0,
-                    }}
-                  >
-                    BETA
-                  </span>
-                )}
               </div>
-              {isBeta && (
-                <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 6, lineHeight: 1.5 }}>
-                  Same agent pipeline (inventory → lineage → usage → summary → transformation
-                  → orchestration). Connector for {sourceSpec.name} is in private beta — Run is
-                  disabled until activation.
-                </div>
-              )}
             </div>
 
             {/* Connection fields — labels swap per source */}
