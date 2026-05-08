@@ -94,7 +94,7 @@ class _BuilderState:
     completed_stages: list[_Stage] = field(default_factory=list)
     operations: list[OperationsScript] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    schema: str = "staging"
+    schema: str = ""  # empty -> SQLX omits `schema:` and Dataform uses defaultDataset
 
     @property
     def nodes(self):

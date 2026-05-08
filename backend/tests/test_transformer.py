@@ -82,11 +82,13 @@ def test_project_assembly_has_all_required_files():
     project = generate_project(_load_samples())
     assert "workflow_settings.yaml" in project.files
     assert "README.md" in project.files
-    assert "definitions/sources.sqlx" in project.files
+    # Source declarations live as one .sqlx per source under definitions/sources/
+    sources = [p for p in project.files if p.startswith("definitions/sources/")]
+    assert sources, "no source declarations emitted"
     # At least one primary pipeline file
     primary = [p for p in project.files if p.startswith("definitions/")
                and not p.startswith("definitions/operations/")
-               and p != "definitions/sources.sqlx"]
+               and not p.startswith("definitions/sources/")]
     assert primary, "no primary SQLX in project"
 
 
@@ -150,8 +152,8 @@ def test_view_block_renders_with_source_sql():
         [primary],
         views={"vw_member_risk": "SELECT member_id, risk_level FROM members WHERE active = 1"},
     )
-    sources_sql = project.files["definitions/sources.sqlx"]
-    assert 'type: "view"' in sources_sql
-    assert 'name: "vw_member_risk"' in sources_sql
-    assert "SELECT" in sources_sql
-    assert "${ref('members')}" in sources_sql  # body's table ref also wrapped
+    view_file = project.files["definitions/sources/vw_member_risk.sqlx"]
+    assert 'type: "view"' in view_file
+    assert 'name: "vw_member_risk"' in view_file
+    assert "SELECT" in view_file
+    assert "${ref('members')}" in view_file  # body's table ref also wrapped
