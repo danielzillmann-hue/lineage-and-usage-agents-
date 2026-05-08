@@ -158,8 +158,13 @@ def assemble_project(
                 region=config.location,
             )
 
-    # 4. Project-level workflow_settings.yaml.
+    # 4. Project-level config: workflow_settings.yaml + package.json.
+    # Dataform's compile resolves workflow_settings.yaml against the
+    # @dataform/core npm dependency declared in package.json — without
+    # the latter, GCP Dataform fails with "Failed to resolve
+    # workflow_settings.yaml".
     out.files["workflow_settings.yaml"] = _build_workflow_settings(config)
+    out.files["package.json"] = _build_package_json(config)
 
     # 5. Validation pass — runs on every assembled project. The full
     # generated file list (including the just-built sources/* files)
@@ -405,6 +410,22 @@ def _build_workflow_settings(config: DataformProjectConfig) -> str:
         f"defaultDataset: {config.default_dataset}\n"
         f"defaultAssertionDataset: {config.assertion_dataset}\n"
         f"dataformCoreVersion: {config.dataform_core_version}\n"
+    )
+
+
+def _build_package_json(config: DataformProjectConfig) -> str:
+    """Minimal package.json so Dataform's compile can resolve
+    @dataform/core. Without this, GCP Dataform fails with
+    "Failed to resolve workflow_settings.yaml".
+    """
+    return (
+        "{\n"
+        '  "name": "dataform-project",\n'
+        f'  "version": "1.0.0",\n'
+        '  "dependencies": {\n'
+        f'    "@dataform/core": "{config.dataform_core_version}"\n'
+        '  }\n'
+        "}\n"
     )
 
 
