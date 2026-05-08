@@ -225,17 +225,17 @@ Datastream is the GCP-native, low-latency Oracle CDC service.
    (BigQuery). Replace `<HOST>` / `<USER>` / `<PASS>` with your values:
    ```bash
    gcloud datastream connection-profiles create oracle-source \\
-     --location={region} --type=oracle --display-name="Insignia Oracle" \\
+     --location={region} --type=oracle --display-name="Source Oracle" \\
      --oracle-hostname=<HOST> --oracle-port=1521 \\
      --oracle-username=<USER> --oracle-password=<PASS> \\
      --oracle-database-service=<SERVICE>
 
    gcloud datastream connection-profiles create bq-target \\
-     --location={region} --type=bigquery --display-name="Insignia BQ"
+     --location={region} --type=bigquery --display-name="Target BigQuery"
    ```
 3. Create the stream (initial backfill + ongoing CDC):
    ```bash
-   gcloud datastream streams create insignia-stream \\
+   gcloud datastream streams create oracle-to-bq-stream \\
      --location={region} \\
      --source=oracle-source --destination=bq-target \\
      --oracle-source-config="<json-with-tables-listed>" \\

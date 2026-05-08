@@ -18,7 +18,7 @@ last_result: ExecutiveSummary | None = None
 
 _SUMMARY_PROMPT = """\
 You are presenting findings from a multi-agent analysis of an Oracle data
-warehouse + ETL pipelines to a technical audience at Insignia Financial.
+warehouse + ETL pipelines to a technical audience.
 
 You have:
   - inventory: source tables (with FK relationships), defined ETL pipelines

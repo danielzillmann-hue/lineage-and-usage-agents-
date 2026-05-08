@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 _PROMPT = """\
 You are classifying columns of an Australian wealth-management Oracle warehouse
-for a migration program at Insignia Financial.
+for a cloud-migration program.
 
 For each column, return:
 

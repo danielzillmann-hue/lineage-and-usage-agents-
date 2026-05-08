@@ -142,11 +142,10 @@ export function ExecutiveSummaryView({ results }: { results: RunResults }) {
       {sum && (
         <Card>
           <CardHeader>
-            <CardTitle>Headline</CardTitle>
+            <CardTitle>Analysis Results</CardTitle>
             <CardDescription>Synthesized by Gemini 2.5 Pro from the agents&apos; outputs.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-[15px] leading-relaxed text-[var(--ink)] text-pretty">{sum.headline}</p>
+          <CardContent>
             <ul className="space-y-2">
               {sum.bullets.map((b, i) => (
                 <li key={i} className="flex items-start gap-2.5 text-[13.5px] leading-relaxed text-[var(--color-fg)]">

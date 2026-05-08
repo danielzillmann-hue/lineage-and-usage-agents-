@@ -20,7 +20,7 @@ const sourceSerif = Source_Serif_4({
 });
 
 export const metadata: Metadata = {
-  title: "Lineage & Usage Agents — intelia × Insignia Financial",
+  title: "Lineage & Usage Agents",
   description:
     "Multi-agent analysis of an Oracle warehouse: schema inventory, lineage graph, usage analytics, and findings.",
 };

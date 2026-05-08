@@ -27,10 +27,6 @@ export function SiteHeader() {
         <span style={{ width: 1, height: 22, background: "var(--line)" }} />
         <span style={{ fontSize: 13.5, color: "var(--ink-2)" }}>
           Lineage &amp; Usage Agents
-          <span style={{ color: "var(--ink-4)", margin: "0 8px" }}>·</span>
-          <span className="mono" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
-            Insignia Financial
-          </span>
         </span>
       </Link>
       <nav style={{ display: "flex", gap: 28, alignItems: "center", fontSize: 14, color: "var(--ink-2)" }}>
