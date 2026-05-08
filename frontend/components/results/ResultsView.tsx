@@ -68,7 +68,7 @@ export function ResultsView({ runId }: { runId: string }) {
                   color: "var(--ink)",
                 }}
               >
-                {results.summary?.headline ?? "Analysis complete"}
+                Analysis Results
               </h1>
               <div
                 style={{
