@@ -27,9 +27,85 @@ const AGENTS: AgentSpec[] = [
   { id: "orchestration", name: "Orchestration", desc: "Generate a GitHub Actions workflow (compile-on-push + scheduled run)",      icon: Workflow,  tint: "#0A8B5E", bg: "#E0F2F1" },
 ];
 
+// ─── Source-system catalogue ────────────────────────────────────────────────
+//
+// Oracle is the only source we currently introspect end-to-end (and the only
+// option that drives the demo). The others are visible in the dropdown so the
+// solution looks ready for real-world heterogeneity — selecting them swaps
+// the connection field labels and shows a "Beta" pill.
+
+type SourceType = "oracle" | "teradata" | "mssql" | "bigquery" | "snowflake" | "sybase";
+
+type SourceField = { key: string; label: string; placeholder?: string };
+
+type SourceSpec = {
+  id: SourceType;
+  name: string;
+  defaultPort: number;
+  fields: SourceField[];
+  status: "supported" | "beta";
+};
+
+const SOURCE_TYPES: SourceSpec[] = [
+  { id: "oracle",    name: "Oracle",       defaultPort: 1521, status: "supported",
+    fields: [
+      { key: "host", label: "HOST" },
+      { key: "port", label: "PORT" },
+      { key: "service", label: "SERVICE", placeholder: "XEPDB1" },
+      { key: "user", label: "USER" },
+      { key: "password", label: "PASSWORD" },
+    ],
+  },
+  { id: "teradata",  name: "Teradata",     defaultPort: 1025, status: "beta",
+    fields: [
+      { key: "host", label: "HOST" },
+      { key: "port", label: "PORT" },
+      { key: "service", label: "DATABASE" },
+      { key: "user", label: "USER" },
+      { key: "password", label: "PASSWORD" },
+    ],
+  },
+  { id: "mssql",     name: "MS SQL Server", defaultPort: 1433, status: "beta",
+    fields: [
+      { key: "host", label: "SERVER" },
+      { key: "port", label: "PORT" },
+      { key: "service", label: "DATABASE" },
+      { key: "user", label: "USER" },
+      { key: "password", label: "PASSWORD" },
+    ],
+  },
+  { id: "bigquery",  name: "BigQuery",     defaultPort: 0, status: "beta",
+    fields: [
+      { key: "host", label: "PROJECT", placeholder: "my-gcp-project" },
+      { key: "service", label: "DATASET", placeholder: "raw" },
+      { key: "user", label: "SERVICE ACCOUNT", placeholder: "agent@project.iam.gserviceaccount.com" },
+    ],
+  },
+  { id: "snowflake", name: "Snowflake",    defaultPort: 443, status: "beta",
+    fields: [
+      { key: "host", label: "ACCOUNT", placeholder: "xy12345.ap-southeast-2" },
+      { key: "service", label: "WAREHOUSE", placeholder: "COMPUTE_WH" },
+      { key: "port", label: "DATABASE" },
+      { key: "user", label: "USER" },
+      { key: "password", label: "PASSWORD" },
+    ],
+  },
+  { id: "sybase",    name: "Sybase IQ",    defaultPort: 2638, status: "beta",
+    fields: [
+      { key: "host", label: "HOST" },
+      { key: "port", label: "PORT" },
+      { key: "service", label: "DATABASE" },
+      { key: "user", label: "USER" },
+      { key: "password", label: "PASSWORD" },
+    ],
+  },
+];
+
+
 export function SetupForm() {
   const router = useRouter();
   const [conn, setConn] = useState<OracleConnection | null>(null);
+  const [sourceType, setSourceType] = useState<SourceType>("oracle");
   const [bucket, setBucket] = useState("");
   const [prefix, setPrefix] = useState("");
   const [outputsPrefix, setOutputsPrefix] = useState<string | null>(null);
@@ -38,6 +114,9 @@ export function SetupForm() {
   const [error, setError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestConnectionResponse | null>(null);
+
+  const sourceSpec = SOURCE_TYPES.find((s) => s.id === sourceType) ?? SOURCE_TYPES[0];
+  const isBeta = sourceSpec.status === "beta";
 
   useEffect(() => {
     api.demoDefaults().then((d) => {
@@ -51,7 +130,7 @@ export function SetupForm() {
   const toggle = (id: AgentName) =>
     setActive((a) => a.includes(id) ? a.filter((x) => x !== id) : [...a, id]);
 
-  const canRun = !!conn && active.length > 0 && !submitting;
+  const canRun = !!conn && active.length > 0 && !submitting && !isBeta;
 
   const onTest = async () => {
     if (!conn) return;
@@ -119,9 +198,9 @@ export function SetupForm() {
         className="text-pretty"
         style={{ fontSize: 17, lineHeight: 1.55, color: "var(--ink-2)", maxWidth: 640, margin: 0 }}
       >
-        Six agents introspect your live database, map column-level lineage, score usage, generate
-        Dataform SQLX, and emit a CI workflow — in minutes, not weeks. Toggle any agent on or off
-        in the picker to the right.
+        Six agents introspect your warehouse — Oracle, Teradata, MS SQL, BigQuery, Snowflake,
+        or Sybase — map column-level lineage, score usage, generate Dataform SQLX, and emit a
+        CI workflow. Minutes, not weeks. Toggle any agent on or off in the picker to the right.
       </p>
 
       <div
@@ -134,38 +213,95 @@ export function SetupForm() {
           <section>
             <div className="eyebrow">01 · Connection</div>
             <h2 style={{ fontSize: 20, fontWeight: 500, margin: "8px 0 4px", letterSpacing: "-0.01em" }}>
-              Connect to your Oracle database
+              Connect to your warehouse
             </h2>
             <p style={{ color: "var(--ink-3)", fontSize: 14, margin: "0 0 20px" }}>
               Live introspection — schema, FKs, audit log. No extracts to upload.
             </p>
 
+            {/* Source type dropdown */}
+            <div style={{ marginBottom: 18 }}>
+              <div className="eyebrow" style={{ fontSize: 10.5, marginBottom: 6 }}>Source type</div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <select
+                  value={sourceType}
+                  onChange={(e) => {
+                    const next = e.target.value as SourceType;
+                    setSourceType(next);
+                    setTestResult(null);
+                    // Reset port to the new source's default if user hasn't typed
+                    const spec = SOURCE_TYPES.find((s) => s.id === next);
+                    if (spec && conn) setConn({ ...conn, port: spec.defaultPort });
+                  }}
+                  className="mono"
+                  style={{
+                    flex: 1, height: 38, padding: "0 12px",
+                    fontSize: 13, color: "var(--ink)",
+                    background: "var(--bg-elev)", border: "1px solid var(--line)",
+                    borderRadius: 6, outline: "none",
+                  }}
+                >
+                  {SOURCE_TYPES.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}{s.status === "beta" ? "  (Beta)" : ""}
+                    </option>
+                  ))}
+                </select>
+                {isBeta && (
+                  <span
+                    className="mono"
+                    title="Connectors for non-Oracle sources are in private beta. Contact intelia for access."
+                    style={{
+                      fontSize: 10.5, padding: "4px 10px",
+                      background: "#FFF3E0", color: "#E65100",
+                      border: "1px solid #F57C00", borderRadius: 99,
+                      flexShrink: 0,
+                    }}
+                  >
+                    BETA
+                  </span>
+                )}
+              </div>
+              {isBeta && (
+                <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 6, lineHeight: 1.5 }}>
+                  Same agent pipeline (inventory → lineage → usage → summary → transformation
+                  → orchestration). Connector for {sourceSpec.name} is in private beta — Run is
+                  disabled until activation.
+                </div>
+              )}
+            </div>
+
+            {/* Connection fields — labels swap per source */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <MonoInputField
-                label="HOST"
-                icon={<Database className="h-4 w-4" strokeWidth={1.25} />}
-                value={conn.host}
-                onChange={(v) => setConn({ ...conn, host: v })}
-                className="md:col-span-2"
-              />
-              <MonoInputField
-                label="PORT"
-                value={String(conn.port)}
-                type="number"
-                onChange={(v) => setConn({ ...conn, port: Number(v || 1521) })}
-              />
+              {sourceSpec.fields.slice(0, 2).map((f) => (
+                <MonoInputField
+                  key={f.key}
+                  label={f.label}
+                  icon={f.key === "host" ? <Database className="h-4 w-4" strokeWidth={1.25} /> : undefined}
+                  value={fieldValue(conn, f.key)}
+                  type={f.key === "port" ? "number" : f.key === "password" ? "password" : "text"}
+                  onChange={(v) => setConn(updateConn(conn, f.key, v, sourceSpec.defaultPort))}
+                  className={f.key === "host" && sourceSpec.fields.length > 2 ? "md:col-span-2" : undefined}
+                />
+              ))}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-              <MonoInputField label="SERVICE" value={conn.service} onChange={(v) => setConn({ ...conn, service: v })} />
-              <MonoInputField label="USER" value={conn.user} onChange={(v) => setConn({ ...conn, user: v })} />
-              <MonoInputField label="PASSWORD" type="password" value={conn.password} onChange={(v) => setConn({ ...conn, password: v })} />
+              {sourceSpec.fields.slice(2).map((f) => (
+                <MonoInputField
+                  key={f.key}
+                  label={f.label}
+                  value={fieldValue(conn, f.key)}
+                  type={f.key === "password" ? "password" : "text"}
+                  onChange={(v) => setConn(updateConn(conn, f.key, v, sourceSpec.defaultPort))}
+                />
+              ))}
             </div>
 
             <div className="mt-3 flex items-center justify-between">
               <span className="mono" style={{ fontSize: 11.5, color: "var(--ink-4)" }}>
-                {conn.host}:{conn.port}/{conn.service}
+                {sourceSpec.name} · {conn.host}{conn.port ? `:${conn.port}` : ""}{conn.service ? `/${conn.service}` : ""}
               </span>
-              <button onClick={onTest} disabled={testing} style={btnSecondary}>
+              <button onClick={onTest} disabled={testing || isBeta} style={btnSecondary}>
                 {testing
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   : <Plug className="h-3.5 w-3.5" strokeWidth={1.25} />}
@@ -365,6 +501,35 @@ const btnSecondary: React.CSSProperties = {
   background: "var(--bg-elev)", color: "var(--ink)", border: "1px solid var(--line)",
   cursor: "pointer", transition: "background .15s, border-color .15s",
 };
+
+function fieldValue(conn: OracleConnection, key: string): string {
+  switch (key) {
+    case "host": return conn.host;
+    case "port": return String(conn.port || "");
+    case "service": return conn.service;
+    case "user": return conn.user;
+    case "password": return conn.password;
+    default: return "";
+  }
+}
+
+
+function updateConn(
+  conn: OracleConnection,
+  key: string,
+  value: string,
+  defaultPort: number,
+): OracleConnection {
+  switch (key) {
+    case "host":     return { ...conn, host: value };
+    case "port":     return { ...conn, port: Number(value || defaultPort) };
+    case "service":  return { ...conn, service: value };
+    case "user":     return { ...conn, user: value };
+    case "password": return { ...conn, password: value };
+    default:         return conn;
+  }
+}
+
 
 function MonoInputField({
   label, icon, value, onChange, type = "text", className,
