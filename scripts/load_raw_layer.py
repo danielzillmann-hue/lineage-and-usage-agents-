@@ -115,7 +115,10 @@ def _oracle_type_code_to_bq(type_code, precision, scale) -> str:
     if "TIMESTAMP" in name:
         return "TIMESTAMP"
     if "BLOB" in name or "RAW" in name:
-        return "BYTES"
+        # Hex-encoded STRING avoids pyarrow's fixed_size_binary inference
+        # (which rejects RAW(8) values as "expected length 16" UUIDs) and
+        # is friendly enough for demo BigQuery exploration.
+        return "STRING"
     if "CLOB" in name or "VARCHAR" in name or "CHAR" in name or "ROWID" in name:
         return "STRING"
     if "BOOLEAN" in name:
@@ -135,6 +138,17 @@ def replicate_table(
     """Pull one table's rows from Oracle, load into BQ. Returns (row_count, status)."""
     target = f"{cfg.bq_project}.{cfg.bq_dataset}.{table}"
 
+    # If the BQ side is already a view (e.g. Dataform materialized it from
+    # an Oracle view declaration), don't try to overwrite it — replicating
+    # source data into a view is meaningless and the load API rejects it.
+    try:
+        existing = bq_client.get_table(target)
+        if existing.table_type == "VIEW":
+            log.info("  skip — %s is a VIEW (managed by Dataform)", target)
+            return (0, "skipped (view)")
+    except NotFound:
+        pass
+
     if cfg.if_exists == "skip":
         try:
             existing = bq_client.get_table(target)
@@ -144,7 +158,38 @@ def replicate_table(
             pass
 
     cursor = oracle_conn.cursor()
-    sql = f"SELECT * FROM {table}"
+
+    # Introspect column types so we can wrap RAW columns with RAWTOHEX —
+    # otherwise oracledb's RAW→bytes path tangles with pyarrow's UUID
+    # inference ("Got bytestring of length 8 (expected 16)" on mixed-
+    # length RAW columns).
+    select_list = "*"
+    try:
+        cursor.execute(
+            "SELECT column_name, data_type "
+            "FROM all_tab_columns "
+            "WHERE table_name = UPPER(:t) "
+            "ORDER BY column_id",
+            t=table,
+        )
+        cols = cursor.fetchall()
+        if cols:
+            log.info("  oracle column types: %s", ", ".join(f"{c[0]}:{c[1]}" for c in cols))
+            parts = []
+            for col_name, data_type in cols:
+                dt = (data_type or "").upper()
+                # Anything that comes back as bytes on the Python side
+                # gets hex-encoded in Oracle so pyarrow never sees a
+                # variable-length binary column.
+                if "RAW" in dt or "BLOB" in dt or "UUID" in dt or "BFILE" in dt:
+                    parts.append(f'RAWTOHEX("{col_name}") AS "{col_name}"')
+                else:
+                    parts.append(f'"{col_name}"')
+            select_list = ", ".join(parts)
+    except oracledb.DatabaseError as e:
+        log.warning("  metadata introspection failed (%s); falling back to SELECT *", e)
+
+    sql = f"SELECT {select_list} FROM {table}"
     if cfg.limit:
         sql += f" FETCH FIRST {cfg.limit} ROWS ONLY"
     log.info("  extracting from Oracle: %s", sql)
@@ -164,8 +209,14 @@ def replicate_table(
     df = _normalise_dataframe(df, schema)
 
     log.info("  loading %d rows into %s", len(df), target)
+    # Stream as newline-delimited JSON. Avoids pyarrow's type inference,
+    # which can choke on certain DataFrame column patterns ("Got
+    # bytestring of length 8 (expected 16)" on otherwise-clean numeric/
+    # string columns).
+    records = _df_to_json_records(df, schema)
     job_config = bigquery.LoadJobConfig(
         schema=schema,
+        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
         write_disposition=(
             bigquery.WriteDisposition.WRITE_TRUNCATE
             if cfg.if_exists == "replace"
@@ -173,12 +224,51 @@ def replicate_table(
         ),
         create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
     )
-    job = bq_client.load_table_from_dataframe(df, target, job_config=job_config)
+    job = bq_client.load_table_from_json(records, target, job_config=job_config)
     job.result(timeout=600)
     if job.errors:
         log.error("  load failed: %s", job.errors)
         return (len(df), f"error: {job.errors}")
     return (len(df), "loaded")
+
+
+def _df_to_json_records(df: pd.DataFrame, schema: list[bigquery.SchemaField]) -> list[dict]:
+    """Convert a DataFrame to JSON-loadable records — no pyarrow involved."""
+    from datetime import date, datetime
+    from decimal import Decimal
+    import numpy as np
+
+    def _scalar(v):
+        if v is None:
+            return None
+        # pandas missing-value sentinels
+        try:
+            if pd.isna(v):
+                return None
+        except (TypeError, ValueError):
+            pass
+        # numpy scalars → Python natives so json.dumps accepts them
+        if isinstance(v, np.generic):
+            v = v.item()
+            if v is None:
+                return None
+        if isinstance(v, (bytes, bytearray)):
+            return v.hex()
+        if isinstance(v, (datetime, pd.Timestamp)):
+            return v.isoformat(sep=" ", timespec="microseconds")
+        if isinstance(v, date):
+            return v.isoformat()
+        if isinstance(v, Decimal):
+            return str(v)
+        if hasattr(v, "read"):  # leftover oracledb LOB
+            return v.read()
+        return v
+
+    records: list[dict] = []
+    cols = [f.name for f in schema]
+    for row in df.itertuples(index=False, name=None):
+        records.append({col: _scalar(val) for col, val in zip(cols, row)})
+    return records
 
 
 def _normalise_dataframe(df: pd.DataFrame, schema: list[bigquery.SchemaField]) -> pd.DataFrame:
@@ -192,7 +282,16 @@ def _normalise_dataframe(df: pd.DataFrame, schema: list[bigquery.SchemaField]) -
             continue
         # Oracle CLOB / NCLOB come back as oracledb.LOB objects — read them.
         if field.field_type == "STRING":
-            df[col] = df[col].apply(lambda v: v.read() if hasattr(v, "read") else v)
+            def _coerce(v):
+                if v is None:
+                    return None
+                if hasattr(v, "read"):
+                    v = v.read()
+                # Hex-encode raw bytes (RAW/BLOB columns mapped to STRING).
+                if isinstance(v, (bytes, bytearray)):
+                    return v.hex()
+                return v
+            df[col] = df[col].apply(_coerce)
             df[col] = df[col].astype("string").where(df[col].notna(), None)
         elif field.field_type == "BYTES":
             df[col] = df[col].apply(lambda v: v.read() if hasattr(v, "read") else v)
@@ -224,6 +323,20 @@ def run(cfg: Config) -> None:
              cfg.oracle_host, cfg.oracle_port, cfg.oracle_service, cfg.oracle_user)
     dsn = oracledb.makedsn(cfg.oracle_host, cfg.oracle_port, service_name=cfg.oracle_service)
     oracle_conn = oracledb.connect(user=cfg.oracle_user, password=cfg.oracle_pass, dsn=dsn)
+
+    # Force RAW columns to come back as raw bytes. Without this, oracledb
+    # auto-converts RAW(16) into Python uuid.UUID — which blows up
+    # ("got bytestring of length N, expected 16") if any row's RAW value
+    # isn't exactly 16 bytes.
+    def _no_uuid_handler(cursor, metadata):
+        if metadata.type_code is oracledb.DB_TYPE_RAW:
+            return cursor.var(
+                bytes,
+                size=metadata.size or 4000,
+                arraysize=cursor.arraysize,
+            )
+        return None
+    oracle_conn.outputtypehandler = _no_uuid_handler
 
     bq_client = bigquery.Client(project=cfg.bq_project, location=cfg.bq_location)
     ensure_dataset(bq_client, cfg.bq_project, cfg.bq_dataset, cfg.bq_location)

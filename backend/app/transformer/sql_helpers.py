@@ -345,10 +345,11 @@ def classify_dml(sql: str) -> str:
 def render_dml_for_bigquery(sql: str) -> str:
     """Translate Oracle DML (UPDATE/DELETE/MERGE) to BigQuery-compatible SQL.
 
-    Two passes:
-    1. sqlglot transpile from `oracle` → `bigquery` to convert dialect
-       differences (SYSDATE → CURRENT_DATETIME, NVL → IFNULL, etc.)
-    2. `_wrap_tables_with_ref` to rewrite every bare table identifier to
+    Three passes:
+    1. AST-level fixes for cases sqlglot doesn't translate cleanly
+       (one-arg TRUNC, date-minus-int arithmetic, Oracle date-part codes).
+    2. sqlglot transpile from `oracle` → `bigquery` for the rest.
+    3. `_wrap_tables_with_ref` to rewrite every bare table identifier to
        `${ref('table')}` so Dataform resolves them to the project's
        declared sources.
 
@@ -364,5 +365,173 @@ def render_dml_for_bigquery(sql: str) -> str:
     except Exception:
         return sql.rstrip(";")
 
+    _patch_oracle_dialect_for_bigquery(tree)
     transpiled = tree.sql(dialect="bigquery")
+    transpiled = _patch_bigquery_text(transpiled)
     return _wrap_tables_with_ref(transpiled, tree).rstrip(";")
+
+
+# Oracle date-part codes that BigQuery's *_TRUNC / EXTRACT functions don't
+# accept. Mapped to their BQ equivalents.
+_ORACLE_DATE_PART_TO_BQ = {
+    "MM": "MONTH",
+    "MON": "MONTH",
+    "MONTH": "MONTH",
+    "DD": "DAY",
+    "DAY": "DAY",
+    "D": "DAY",
+    "YYYY": "YEAR",
+    "YEAR": "YEAR",
+    "YY": "YEAR",
+    "Q": "QUARTER",
+    "QUARTER": "QUARTER",
+    "WW": "WEEK",
+    "W": "WEEK",
+    "WEEK": "WEEK",
+    "HH": "HOUR",
+    "HH24": "HOUR",
+    "HOUR": "HOUR",
+    "MI": "MINUTE",
+    "MINUTE": "MINUTE",
+    "SS": "SECOND",
+    "SECOND": "SECOND",
+}
+
+
+def _bq_part(token: str) -> str:
+    """Normalise an Oracle date-part literal ('MM', 'YYYY', etc.) to the
+    BigQuery date-part identifier (MONTH, YEAR, …)."""
+    return _ORACLE_DATE_PART_TO_BQ.get(token.strip().upper().strip("'\""), token)
+
+
+def _patch_oracle_dialect_for_bigquery(tree: exp.Expression) -> None:
+    """In-place tweaks to the parsed Oracle tree so sqlglot's bigquery
+    renderer produces something BQ accepts.
+
+    Targets:
+    - TRUNC(date_expr)            → DATETIME_TRUNC(date_expr, DAY)
+    - TRUNC(date_expr, 'MM')      → DATETIME_TRUNC(date_expr, MONTH)
+      (TRUNC's two-arg form is what sqlglot already maps to DATE_TRUNC,
+      but it leaves the format literal untouched — BQ rejects 'MM'.)
+    - <datetime> - <int>          → DATETIME_SUB(<datetime>, INTERVAL N DAY)
+      Oracle treats numeric subtraction from a date as "N days ago"; BQ
+      requires an explicit interval expression.
+    """
+    # 1. TRUNC handling.
+    for trunc in list(tree.find_all(exp.Anonymous)):
+        if trunc.name and trunc.name.upper() == "TRUNC":
+            args = trunc.expressions
+            if len(args) == 1:
+                # Treat as date-day truncation. Use DATETIME_TRUNC because
+                # Oracle DATE has time-of-day; DATE_TRUNC would require a
+                # DATE column. DATETIME_TRUNC works for both timestamp and
+                # date inputs after sqlglot's auto-cast.
+                trunc.replace(
+                    exp.Anonymous(
+                        this="DATETIME_TRUNC",
+                        expressions=[args[0].copy(), exp.var("DAY")],
+                    )
+                )
+            elif len(args) == 2 and isinstance(args[1], exp.Literal):
+                part = _bq_part(args[1].this)
+                trunc.replace(
+                    exp.Anonymous(
+                        this="DATETIME_TRUNC",
+                        expressions=[args[0].copy(), exp.var(part)],
+                    )
+                )
+
+    # 2. <date_expr> - <int_literal>  →  *_SUB(date_expr, INTERVAL N DAY)
+    #    The pattern occurs in Oracle "give me <N> days ago" idioms like
+    #    `SYSDATE - 365`. The matching BQ function depends on the lhs
+    #    type: TIMESTAMP_SUB for TIMESTAMPs, DATE_SUB for DATEs, otherwise
+    #    DATETIME_SUB. Picking the wrong one causes "no matching signature"
+    #    errors — particularly mixing CURRENT_TIMESTAMP() (TIMESTAMP) with
+    #    DATETIME_SUB.
+    for sub in list(tree.find_all(exp.Sub)):
+        right = sub.right
+        if not isinstance(right, exp.Literal) or not right.is_int:
+            continue
+        left = sub.left
+        # Heuristic: lhs is a date-ish expression. We accept anything
+        # recognisable as a date function or column; arithmetic on plain
+        # numerics goes untouched.
+        if not _looks_like_date(left):
+            continue
+        fn = _date_sub_fn_for(left)
+        sub.replace(
+            exp.Anonymous(
+                this=fn,
+                expressions=[
+                    left.copy(),
+                    exp.Interval(
+                        this=right.copy(),
+                        unit=exp.var("DAY"),
+                    ),
+                ],
+            )
+        )
+
+
+def _date_sub_fn_for(node: exp.Expression) -> str:
+    """Pick the BigQuery *_SUB function whose first argument type matches
+    the inferred type of `node`.
+    """
+    if isinstance(node, exp.CurrentTimestamp):
+        return "TIMESTAMP_SUB"
+    if isinstance(node, exp.CurrentDate):
+        return "DATE_SUB"
+    if isinstance(node, exp.Anonymous) and node.name:
+        n = node.name.upper()
+        if n == "CURRENT_TIMESTAMP":
+            return "TIMESTAMP_SUB"
+        if n in ("SYSDATE", "CURRENT_DATETIME"):
+            return "DATETIME_SUB"
+        if n == "CURRENT_DATE":
+            return "DATE_SUB"
+    if isinstance(node, exp.Column):
+        cn = (node.name or "").lower()
+        if "timestamp" in cn:
+            return "TIMESTAMP_SUB"
+    # Default: DATETIME_SUB. Most Oracle ETL date columns translate to
+    # DATETIME (no timezone), and DATETIME_SUB is the broadest fit.
+    return "DATETIME_SUB"
+
+
+def _looks_like_date(node: exp.Expression) -> bool:
+    """Best-effort: does this expression evaluate to a date/datetime?"""
+    if isinstance(node, (exp.CurrentDate, exp.CurrentTimestamp, exp.CurrentDatetime)):
+        return True
+    if isinstance(node, exp.Anonymous) and node.name:
+        n = node.name.upper()
+        if n in ("SYSDATE", "CURRENT_TIMESTAMP", "CURRENT_DATETIME", "CURRENT_DATE"):
+            return True
+        if n.startswith(("DATETIME_", "TIMESTAMP_", "DATE_")):
+            return True
+    if isinstance(node, exp.Column):
+        # Names that look date-y. Cheap, but covers the common ETL columns.
+        cn = (node.name or "").lower()
+        if any(t in cn for t in ("date", "_dt", "time", "_at", "timestamp")):
+            return True
+    return False
+
+
+def _patch_bigquery_text(sql: str) -> str:
+    """Final text-level cleanups after sqlglot rendering.
+
+    sqlglot maps ``TRUNC(d, 'MM')`` to ``DATE_TRUNC(d, MM)`` (without
+    quotes) — already AST-replaced above, but if the AST pass missed a
+    case we still want any bare BQ-invalid date-part tokens swapped.
+    """
+    # `DATE_TRUNC(... , MM)` etc. — these slip through if sqlglot already
+    # handled the call and we didn't replace it. Targeted text rewrite.
+    import re
+    def _rewrite_part(m: "re.Match[str]") -> str:
+        fn, args, part = m.group(1), m.group(2), m.group(3)
+        return f"{fn}({args}, {_bq_part(part)})"
+    pattern = re.compile(
+        r"\b(DATE_TRUNC|DATETIME_TRUNC|TIMESTAMP_TRUNC|EXTRACT)\("
+        r"(.+?),\s*([A-Za-z]+)\s*\)",
+        re.IGNORECASE | re.DOTALL,
+    )
+    return pattern.sub(_rewrite_part, sql)

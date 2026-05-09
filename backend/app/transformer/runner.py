@@ -87,7 +87,23 @@ def generate_sqlx(xml_files: list[tuple[str, str]]) -> list[GeneratedFile]:
             ))
 
         # Operations (UPDATE/DELETE/MERGE post-load)
+        produced_targets = {
+            (g.target.target_table or "").lower()
+            for g in result.primaries
+            if g.target and g.target.target_table
+        }
         for op in result.operations:
+            # Skip DELETE/TRUNCATE on tables this same pipeline produces
+            # via <load>. In Oracle ETL these clear a staging table before
+            # re-population; in Dataform the CTAS (CREATE OR REPLACE) is
+            # already a wipe-and-rebuild, so the cleanup op is redundant
+            # — and worse, it runs *before* the primary creates the table
+            # and fails with "Table not found".
+            if (
+                op.sql_kind in ("delete", "truncate")
+                and (op.target_table or "").lower() in produced_targets
+            ):
+                continue
             out.append(GeneratedFile(
                 path=f"definitions/operations/{op.name}.sqlx",
                 content=_wrap_operations(op),

@@ -19,6 +19,9 @@ Three tiers of pipeline:
 from __future__ import annotations
 
 import logging
+import re
+
+import sqlglot
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
 
@@ -95,6 +98,13 @@ class _BuilderState:
     operations: list[OperationsScript] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     schema: str = ""  # empty -> SQLX omits `schema:` and Dataform uses defaultDataset
+    # Columns added to a staging table by post-load UPDATE statements.
+    # Pre-collected from `<execute_sql>UPDATE staging SET new_col = ...</execute_sql>`
+    # so that the staging stage's CTAS includes those columns (NULL-init)
+    # — without that, downstream <extract>s referencing them would fail
+    # with "Unrecognized name: <new_col>" against the BQ-materialised
+    # staging table.
+    dynamic_columns: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def nodes(self):
@@ -148,6 +158,10 @@ def parse(xml_text: str, filename: str) -> TransformResult | None:
     steps_el = root.find("steps")
     if steps_el is None:
         return TransformResult(pipeline_name=name, warnings=["pipeline has no <steps>"])
+
+    # Pre-pass: collect columns introduced by post-load UPDATEs so the
+    # staging table's CTAS knows about them.
+    state.dynamic_columns = _collect_update_set_columns(steps_el)
 
     for child in steps_el:
         try:
@@ -339,7 +353,10 @@ def _process_transform(el: ET.Element, state: _BuilderState) -> None:
             c2 = child.attrib.get("col2") or ""
             res = child.attrib.get("result_column") or "calc"
             sym = {"multiply": "*", "add": "+", "subtract": "-", "divide": "/"}.get(op, "+")
-            new_cols.append(ColumnDef(name=res, expression=f"src.{c1} {sym} src.{c2}"))
+            new_cols.append(ColumnDef(
+                name=res,
+                expression=f"{_math_operand(c1)} {sym} {_math_operand(c2)}",
+            ))
         elif tag == "calculate_category":
             col = child.attrib.get("column") or ""
             res = child.attrib.get("result_column") or "category"
@@ -379,6 +396,63 @@ def _process_transform(el: ET.Element, state: _BuilderState) -> None:
     state.add_node(expr_node, step_id, out_cols)
 
 
+_NUMERIC_LITERAL_RE = re.compile(r"^-?\d+(\.\d+)?$")
+
+
+def _collect_update_set_columns(steps_el: ET.Element) -> dict[str, list[str]]:
+    """Walk all `<execute_sql>` children, parse each query, and for any
+    UPDATE statements, record `target_table → [columns being SET]`.
+
+    Used to pre-extend the staging table's CTAS schema so post-load
+    UPDATEs can target columns that didn't exist in the pre-load
+    projection.
+    """
+    out: dict[str, list[str]] = {}
+    for el in steps_el.findall("execute_sql"):
+        sql = (el.findtext("query") or "").strip()
+        if not sql:
+            continue
+        try:
+            tree = sqlglot.parse_one(sql, dialect="oracle")
+        except Exception:
+            continue
+        if not isinstance(tree, sqlglot.exp.Update):
+            continue
+        target = tree.this
+        target_name = None
+        if isinstance(target, sqlglot.exp.Table):
+            target_name = (target.name or "").lower()
+        if not target_name:
+            continue
+        cols = out.setdefault(target_name, [])
+        for set_eq in tree.args.get("expressions") or []:
+            # SET col = value parses as an EQ node; the LHS is the column.
+            if isinstance(set_eq, sqlglot.exp.EQ):
+                lhs = set_eq.left
+                if isinstance(lhs, sqlglot.exp.Column):
+                    cn = (lhs.name or "")
+                    if cn and cn not in cols:
+                        cols.append(cn)
+    return out
+
+
+def _math_operand(token: str) -> str:
+    """Render a `<math col1=... col2=...>` operand.
+
+    Numeric literals are passed through verbatim ("100", "-2.5"); everything
+    else is treated as a column name and prefixed with the upstream alias
+    `src.`. Without this, expressions like `<math col2="100">` rendered as
+    `src.100`, which sqlglot's BigQuery emitter strips to `src.` (a syntax
+    error in the generated SQL).
+    """
+    t = token.strip()
+    if not t:
+        return "NULL"
+    if _NUMERIC_LITERAL_RE.match(t):
+        return t
+    return f"src.{t}"
+
+
 def _process_load(el: ET.Element, state: _BuilderState) -> None:
     """`<load input="X" type="oracle|csv" table="..." path="..."/>`."""
     input_id = el.attrib.get("input") or ""
@@ -392,10 +466,25 @@ def _process_load(el: ET.Element, state: _BuilderState) -> None:
         state.warnings.append("load: no target table or path")
         return
 
+    target_cols = [ColumnDef(name=c.name, expression=c.name) for c in upstream_cols]
+
+    # If post-load UPDATE statements introduce columns that aren't in the
+    # upstream projection, append them with NULL values so the CTAS-built
+    # table has the right schema for those UPDATEs (and downstream
+    # SELECTs) to land on.
+    extras = state.dynamic_columns.get(target_table.lower(), [])
+    existing = {c.name.lower() for c in target_cols}
+    for extra in extras:
+        if extra.lower() not in existing:
+            target_cols.append(
+                ColumnDef(name=extra, expression="CAST(NULL AS INT64)")
+            )
+            existing.add(extra.lower())
+
     target = TargetMapping(
         target_table=target_table,
         target_schema=state.schema,
-        columns=[ColumnDef(name=c.name, expression=c.name) for c in upstream_cols],
+        columns=target_cols,
         is_incremental=False,
     )
     state.commit_stage(target)
