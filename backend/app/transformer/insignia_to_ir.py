@@ -105,6 +105,12 @@ class _BuilderState:
     # with "Unrecognized name: <new_col>" against the BQ-materialised
     # staging table.
     dynamic_columns: dict[str, list[str]] = field(default_factory=dict)
+    # Columns inferred for each `<extract_csv id="X">` step from how the
+    # source is referenced downstream (JOIN ON, <math> col1/col2,
+    # <calculate_category column=...>). Without this the SourceNode has
+    # an empty column list, the JOIN's column merge drops the CSV side,
+    # and downstream `src.<csv_col>` references fail to resolve.
+    csv_step_columns: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def nodes(self):
@@ -162,6 +168,9 @@ def parse(xml_text: str, filename: str) -> TransformResult | None:
     # Pre-pass: collect columns introduced by post-load UPDATEs so the
     # staging table's CTAS knows about them.
     state.dynamic_columns = _collect_update_set_columns(steps_el)
+    # Pre-pass: infer columns for each <extract_csv> from how it's used
+    # by sibling steps so JOINs include the CSV side.
+    state.csv_step_columns = _collect_csv_step_columns(steps_el)
 
     for child in steps_el:
         try:
@@ -218,14 +227,22 @@ def _process_extract(el: ET.Element, state: _BuilderState) -> None:
 def _process_extract_csv(el: ET.Element, state: _BuilderState) -> None:
     """External CSV reader. We treat it as a SourceNode pointing to a logical
     BQ external declaration named after the CSV file (without extension).
+
+    Columns are seeded from the pipeline-level pre-scan (`csv_step_columns`)
+    so JOINs against this source contribute the CSV's columns to the
+    merged output.
     """
     step_id = el.attrib.get("id") or f"extcsv_{len(state.nodes)}"
     path = el.attrib.get("path") or ""
     csv_name = path.split("/")[-1].removesuffix(".csv").lower() or step_id
+    inferred = state.csv_step_columns.get(step_id, [])
     src = SourceNode(
         cte_name=f"cte_{step_id}_src",
         table_ref=csv_name,
-        columns=[],  # populated downstream when JOIN/SELECT references columns
+        columns=[
+            ColumnDef(name=c, expression=c, is_passthrough=True)
+            for c in inferred
+        ],
     )
     state.add_node(src, step_id, src.columns)
 
@@ -409,6 +426,108 @@ def _process_transform(el: ET.Element, state: _BuilderState) -> None:
 
 
 _NUMERIC_LITERAL_RE = re.compile(r"^-?\d+(\.\d+)?$")
+
+
+def _collect_csv_step_columns(steps_el: ET.Element) -> dict[str, list[str]]:
+    """For each `<extract_csv id="X">` step, infer the columns that step
+    contributes by tracing how downstream steps reference it.
+
+    Sources of column hints:
+    - `<join on="COL">` where the CSV step is left or right → COL is a
+      column on both sides of the join (so on the CSV).
+    - `<math col1=... col2=...>` inside a `<transform input="J">` whose
+      input chains back to the CSV step. col1 belongs to one upstream,
+      col2 to the other; we can't always tell which, so we add both as
+      candidates on the CSV side. False positives just become extra
+      NULL-default columns on the stub — harmless.
+    - `<calculate_category column="C">` and `<sum column="C">` inside
+      transforms/aggregates downstream of the CSV → C is a column on
+      one of the inputs.
+
+    The IR's `_process_join` reads the CSV's column list when merging
+    join sides; without this pre-scan it gets `[]` and drops the CSV
+    columns from the merged output.
+    """
+    # 1. Collect all CSV step ids in this pipeline.
+    csv_steps: set[str] = set()
+    for el in steps_el.findall("extract_csv"):
+        sid = el.attrib.get("id")
+        if sid:
+            csv_steps.add(sid)
+    if not csv_steps:
+        return {}
+
+    # 2. Build a transitive "downstream of CSV step" map: every step id
+    #    whose input chains back to a CSV step. Joins and transforms/
+    #    aggregates declare their inputs, so we walk in document order
+    #    and propagate.
+    downstream_of: dict[str, set[str]] = {sid: {sid} for sid in csv_steps}
+    for el in steps_el:
+        sid = el.attrib.get("id")
+        if not sid:
+            continue
+        # Inputs this step pulls from.
+        inputs: list[str] = []
+        if "input" in el.attrib:
+            inputs.append(el.attrib["input"])
+        if el.tag == "join":
+            if "left" in el.attrib:
+                inputs.append(el.attrib["left"])
+            if "right" in el.attrib:
+                inputs.append(el.attrib["right"])
+        for csv_sid, downs in downstream_of.items():
+            if any(i in downs for i in inputs):
+                downs.add(sid)
+
+    # 3. Mine column attributes for each CSV step.
+    cols: dict[str, list[str]] = {sid: [] for sid in csv_steps}
+    seen: dict[str, set[str]] = {sid: set() for sid in csv_steps}
+
+    def _add(csv_sid: str, name: str) -> None:
+        n = (name or "").strip()
+        if not n:
+            return
+        if n.upper() in seen[csv_sid]:
+            return
+        seen[csv_sid].add(n.upper())
+        cols[csv_sid].append(n)
+
+    for el in steps_el:
+        if el.tag == "join":
+            on_col = el.attrib.get("on") or ""
+            left = el.attrib.get("left") or ""
+            right = el.attrib.get("right") or ""
+            for csv_sid in csv_steps:
+                if csv_sid in (left, right) and on_col:
+                    _add(csv_sid, on_col)
+        elif el.tag in ("transform", "aggregate"):
+            input_id = el.attrib.get("input") or ""
+            affected = [
+                csv_sid
+                for csv_sid in csv_steps
+                if input_id in downstream_of[csv_sid]
+            ]
+            if not affected:
+                continue
+            for child in el:
+                ctag = child.tag.lower()
+                if ctag == "math":
+                    for attr in ("col1", "col2"):
+                        v = child.attrib.get(attr)
+                        if v:
+                            for sid in affected:
+                                _add(sid, v)
+                elif ctag in ("sum", "min", "max", "avg", "count"):
+                    v = child.attrib.get("column")
+                    if v:
+                        for sid in affected:
+                            _add(sid, v)
+                elif ctag == "calculate_category":
+                    v = child.attrib.get("column")
+                    if v:
+                        for sid in affected:
+                            _add(sid, v)
+    return {k: v for k, v in cols.items() if v}
 
 
 def _collect_update_set_columns(steps_el: ET.Element) -> dict[str, list[str]]:
