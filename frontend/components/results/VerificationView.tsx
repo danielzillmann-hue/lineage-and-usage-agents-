@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import type {
   VerificationReport, TableComparison, VerifyStatus, VerifyClassification,
 } from "@/lib/api";
+import type { OracleConnection } from "@/lib/types";
 
 const STATUS_META: Record<
   VerifyStatus,
@@ -47,6 +48,7 @@ export function VerificationView({ runId }: { runId: string }) {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const [needsCreds, setNeedsCreds] = useState(false);
   const [filter, setFilter] = useState<"all" | VerifyStatus>("all");
 
   useEffect(() => {
@@ -57,16 +59,24 @@ export function VerificationView({ runId }: { runId: string }) {
       .finally(() => setLoading(false));
   }, [runId]);
 
-  const triggerVerify = async () => {
+  const triggerVerify = async (oracle?: OracleConnection) => {
     setRunning(true);
     setRunError(null);
     try {
-      await api.verifyTrigger(runId);
+      await api.verifyTrigger(runId, oracle);
       const fresh = await api.verifyReport(runId);
       setReport(fresh);
+      setNeedsCreds(false);
       setError(null);
     } catch (e) {
-      setRunError(String(e));
+      const msg = String(e);
+      // 409 = backend lost the cached creds — let the user re-enter them.
+      if (msg.includes("409")) {
+        setNeedsCreds(true);
+        setRunError(null);
+      } else {
+        setRunError(msg);
+      }
     } finally {
       setRunning(false);
     }
@@ -94,7 +104,15 @@ export function VerificationView({ runId }: { runId: string }) {
             pipelines in BigQuery — verification compares Oracle to whatever
             is actually in BQ right now.
           </p>
-          <RunButton onClick={triggerVerify} running={running} />
+          {needsCreds ? (
+            <CredentialsForm
+              running={running}
+              onSubmit={(creds) => triggerVerify(creds)}
+              onCancel={() => setNeedsCreds(false)}
+            />
+          ) : (
+            <RunButton onClick={() => triggerVerify()} running={running} />
+          )}
           {runError && (
             <p className="mt-4 text-[12px] mono" style={{ color: "var(--crit)", maxWidth: 600, margin: "12px auto 0" }}>
               {runError}
@@ -146,9 +164,18 @@ export function VerificationView({ runId }: { runId: string }) {
             onChange={setFilter}
             counts={summary.by_status as Record<VerifyStatus, number>}
           />
-          <RunButton onClick={triggerVerify} running={running} compact />
+          {!needsCreds && (
+            <RunButton onClick={() => triggerVerify()} running={running} compact />
+          )}
         </div>
       </div>
+      {needsCreds && (
+        <CredentialsForm
+          running={running}
+          onSubmit={(creds) => triggerVerify(creds)}
+          onCancel={() => setNeedsCreds(false)}
+        />
+      )}
       {runError && (
         <div className="text-[12px] mono" style={{ color: "var(--crit)" }}>
           {runError}
@@ -201,6 +228,151 @@ function RunButton({
   );
 }
 
+
+function CredentialsForm({
+  running, onSubmit, onCancel,
+}: {
+  running: boolean;
+  onSubmit: (creds: OracleConnection) => void;
+  onCancel: () => void;
+}) {
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState(1521);
+  const [service, setService] = useState("");
+  const [user, setUser] = useState("");
+  const [password, setPassword] = useState("");
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!host || !service || !user || !password) return;
+    onSubmit({ host, port, service, user, password });
+  };
+
+  return (
+    <form
+      onSubmit={submit}
+      style={{
+        background: "var(--bg-elev)",
+        border: "1px solid var(--line)",
+        borderRadius: "var(--r-md)",
+        padding: "16px",
+        maxWidth: 560,
+        margin: "0 auto",
+        textAlign: "left",
+      }}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <Info className="h-4 w-4" style={{ color: "var(--warn)" }} />
+        <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>
+          Re-enter Oracle credentials
+        </span>
+      </div>
+      <p className="text-[12px] mb-4" style={{ color: "var(--ink-3)" }}>
+        The backend restarted since the run was created, so the cached
+        credentials are gone. Enter them again to compare against Oracle.
+      </p>
+      <div className="grid grid-cols-2 gap-2.5">
+        <Field label="Host">
+          <input value={host} onChange={(e) => setHost(e.target.value)} style={inputStyle()} />
+        </Field>
+        <Field label="Port">
+          <input
+            type="number"
+            value={port}
+            onChange={(e) => setPort(Number(e.target.value) || 1521)}
+            style={inputStyle()}
+          />
+        </Field>
+        <Field label="Service name">
+          <input value={service} onChange={(e) => setService(e.target.value)} style={inputStyle()} />
+        </Field>
+        <Field label="User">
+          <input value={user} onChange={(e) => setUser(e.target.value)} style={inputStyle()} />
+        </Field>
+        <Field label="Password" colSpan={2}>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            style={inputStyle()}
+          />
+        </Field>
+      </div>
+      <div className="flex items-center gap-2 mt-4 justify-end">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={running}
+          style={{
+            fontSize: 12.5,
+            padding: "7px 14px",
+            background: "transparent",
+            color: "var(--ink-2)",
+            border: "1px solid var(--line)",
+            borderRadius: "var(--r-md)",
+            cursor: running ? "default" : "pointer",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={running}
+          style={{
+            fontSize: 12.5,
+            padding: "7px 14px",
+            background: running ? "var(--bg-elev)" : "var(--ink)",
+            color: running ? "var(--ink-3)" : "var(--bg)",
+            border: "1px solid var(--ink)",
+            borderRadius: "var(--r-md)",
+            cursor: running ? "default" : "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          {running
+            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            : <CheckCircle2 className="h-3.5 w-3.5" />}
+          {running ? "Comparing…" : "Run with these credentials"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function Field({
+  label, children, colSpan,
+}: { label: string; children: React.ReactNode; colSpan?: number }) {
+  return (
+    <label
+      style={{
+        gridColumn: colSpan ? `span ${colSpan}` : undefined,
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+      }}
+    >
+      <span className="text-[11px] uppercase tracking-wider" style={{ color: "var(--ink-3)" }}>
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function inputStyle(): React.CSSProperties {
+  return {
+    background: "var(--bg)",
+    color: "var(--ink)",
+    border: "1px solid var(--line)",
+    borderRadius: "var(--r-sm)",
+    padding: "7px 10px",
+    fontSize: 12.5,
+    fontFamily: "var(--font-mono)",
+    width: "100%",
+  };
+}
 
 function SummaryCard({
   label, value, tone,

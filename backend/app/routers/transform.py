@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 import json
 
+from app.models.run import OracleConnection
 from app.services import gcs, github_push, store, transform_storage
 from app.transformer import generate_project
 from app.config import get_settings
@@ -398,34 +399,53 @@ def download_zip(run_id: str) -> Response:
 # ─── Verification endpoints ─────────────────────────────────────────────
 
 
+class VerifyTriggerRequest(BaseModel):
+    """Optional explicit Oracle connection for the verify run.
+
+    When omitted, the verify endpoint reuses the credentials the run was
+    started with (cached in orchestrator memory). When the backend has
+    restarted since the run was created, the cache is gone and the
+    frontend supplies fresh credentials in this body.
+    """
+    oracle: OracleConnection | None = None
+
+
 @router.post("/{run_id}/verify")
-async def trigger_verify(run_id: str) -> dict:
-    """Run the verification agent on demand. Re-uses the Oracle creds the
-    run was originally created with (cached in orchestrator memory) and
-    queries the BigQuery tables the user has materialised via Dataform.
-    Streams progress through the existing run channel.
+async def trigger_verify(
+    run_id: str,
+    body: VerifyTriggerRequest | None = None,
+) -> dict:
+    """Run the verification agent on demand against the run's existing
+    BigQuery tables and Oracle.
     """
     from app.services import store
     from app.services.orchestrator import get_run_request, _emit
     from app.agents import verification_agent
     from app.models.schema import RunResults
+    from app.models.run import RunRequest as _RunRequest
 
     run = await store.get_run(run_id)
     if run is None:
         raise HTTPException(404, f"run {run_id} not found")
 
-    req = get_run_request(run_id)
-    if req is None:
+    cached = get_run_request(run_id)
+    explicit_oracle = body.oracle if body else None
+
+    if explicit_oracle is not None:
+        # Caller passed credentials explicitly — use those, but keep the
+        # original RunRequest's bucket/prefix etc. if we still have them.
+        req = (cached.model_copy(update={"oracle": explicit_oracle})
+               if cached is not None
+               else _RunRequest(oracle=explicit_oracle))
+    elif cached is not None and cached.oracle is not None:
+        req = cached
+    else:
         raise HTTPException(
             409,
-            "Oracle credentials for this run are not cached anymore "
-            "(the backend has restarted since the run was created). "
-            "Start a new analysis, deploy the Dataform project, then "
-            "trigger Verify.",
-        )
-    if req.oracle is None:
-        raise HTTPException(
-            400, "This run was created without an Oracle connection.",
+            "Oracle credentials for this run are not cached on the "
+            "server (the backend was restarted since this run was "
+            "created). Re-enter credentials in the Verify panel to "
+            "continue.",
         )
 
     # Inventory metadata is needed to classify CSV stubs vs Oracle-origin
