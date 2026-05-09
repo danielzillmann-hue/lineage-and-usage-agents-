@@ -15,6 +15,7 @@ import { UsageView } from "./UsageView";
 import { FindingsView } from "./FindingsView";
 import { MigrationView } from "./MigrationView";
 import { TransformView } from "./TransformView";
+import { VerificationView } from "./VerificationView";
 import { AskView } from "./AskView";
 
 export function ResultsView({ runId }: { runId: string }) {
@@ -113,6 +114,7 @@ export function ResultsView({ runId }: { runId: string }) {
               <TabsTrigger value="usage">Usage</TabsTrigger>
               <TabsTrigger value="migration">Migration</TabsTrigger>
               <TabsTrigger value="transform">Transform</TabsTrigger>
+              <TabsTrigger value="verify">Verify</TabsTrigger>
               <TabsTrigger value="ask">Ask</TabsTrigger>
               <TabsTrigger value="findings">
                 Findings
@@ -160,6 +162,11 @@ export function ResultsView({ runId }: { runId: string }) {
             <TabsContent value="transform" className="mt-0">
               <div style={{ marginTop: 0 }}>
                 <TransformView runId={runId} />
+              </div>
+            </TabsContent>
+            <TabsContent value="verify" className="mt-0">
+              <div style={{ maxWidth: 1400, margin: "0 auto", padding: "32px 32px 64px" }}>
+                <VerificationView runId={runId} />
               </div>
             </TabsContent>
             <TabsContent value="ask" className="mt-0">

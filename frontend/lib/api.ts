@@ -64,6 +64,10 @@ export const api = {
       `/api/runs/${id}/transform/orchestrate`,
       { method: "POST" },
     ),
+
+  // ─── Verify tab ──────────────────────────────────────────────────
+  verifyReport: (id: string) =>
+    jfetch<VerificationReport>(`/api/runs/${id}/verify`),
   chat: (id: string, body: ChatRequest) =>
     jfetch<ChatResponse>(`/api/runs/${id}/chat`, {
       method: "POST",
@@ -162,3 +166,67 @@ export function streamRun(
   es.addEventListener("done", () => es.close());
   return () => es.close();
 }
+
+// ─── Verification report ──────────────────────────────────────────────
+
+export type VerifyClassification =
+  | "oracle_origin"
+  | "view_origin"
+  | "csv_stub"
+  | "bq_derived";
+
+export type VerifyStatus =
+  | "match"
+  | "drift"
+  | "missing_in_bq"
+  | "missing_in_oracle"
+  | "missing_both"
+  | "skipped"
+  | "error";
+
+export type ColumnAggregate = {
+  null_count?: number;
+  distinct_count?: number;
+  sum?: string;
+  min?: string;
+  max?: string;
+};
+
+export type ColumnDiff = {
+  column: string;
+  bq_type: string;
+  match: boolean;
+  oracle: ColumnAggregate;
+  bq: ColumnAggregate;
+};
+
+export type TableComparison = {
+  name: string;
+  bq_dataset: string;
+  classification: VerifyClassification;
+  status: VerifyStatus;
+  oracle_rows?: number | null;
+  bq_rows?: number | null;
+  columns_compared: string[];
+  column_diffs: ColumnDiff[];
+  notes: string;
+  error?: string;
+};
+
+export type VerificationReport = {
+  run_id: string;
+  generated_at: string;
+  bq_project: string;
+  raw_dataset: string;
+  derived_dataset: string;
+  summary: {
+    total: number;
+    matched: number;
+    drifted: number;
+    missing: number;
+    skipped: number;
+    errors: number;
+    by_status: Record<string, number>;
+  };
+  tables: TableComparison[];
+};
