@@ -279,17 +279,15 @@ def _declaration_block(
     config: DataformProjectConfig,
     metadata: dict | None = None,
 ) -> str:
-    asserts_block = ""
-    if metadata:
-        body = _assertions_body(metadata)
-        if body:
-            asserts_block = f"\n  assertions: {{\n{body}\n  }},"
+    # Note: Dataform's declaration config does not accept `assertions:` —
+    # only `columns/database/description/name/schema/type`. Assertions on
+    # source tables would need to be emitted as separate assertion actions.
     return f"""config {{
   type: "declaration",
   database: "{config.gcp_project}",
   schema: "{config.source_dataset}",
   name: "{name}",
-  description: "Source table replicated from the Oracle warehouse.",{asserts_block}
+  description: "Source table replicated from the Oracle warehouse.",
 }}"""
 
 

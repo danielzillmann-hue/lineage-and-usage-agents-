@@ -98,6 +98,8 @@ def _build_config(graph: DataflowGraph) -> str:
 
 
 def _sanitize_sqlx_name(name: str) -> str:
-    """Convert a name to a valid SQLX identifier with PascalCase convention."""
-    sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', name).strip('_').lower()
-    return to_pascal_name(sanitized)
+    """Strip non-identifier characters and lowercase. The result must match
+    the file stem and any `${ref('…')}` calls so Dataform resolves
+    dependencies — those use snake_case, so target names do too.
+    """
+    return re.sub(r'[^a-zA-Z0-9_]', '_', name).strip('_').lower()
