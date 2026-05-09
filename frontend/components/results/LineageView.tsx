@@ -1081,7 +1081,7 @@ function GraphSVG({
         </pattern>
         <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
                 markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#6B7884" />
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--ink-3)" />
         </marker>
         <marker id="arrow-dim" viewBox="0 0 10 10" refX="9" refY="5"
                 markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -1099,8 +1099,8 @@ function GraphSVG({
             width={box.w}
             height={box.h}
             rx={14}
-            fill="#FFFFFF"
-            stroke="#D4D1C7"
+            fill="var(--bg-elev)"
+            stroke="var(--line-strong)"
             strokeWidth={1.25}
             strokeDasharray="6 4"
             opacity={0.75}
@@ -1166,7 +1166,7 @@ function GraphSVG({
             <path
               d={d}
               fill="none"
-              stroke={dim ? "var(--line)" : "#6B7884"}
+              stroke={dim ? "var(--line)" : "var(--ink-3)"}
               strokeOpacity={dim ? 0.3 : 0.7}
               strokeWidth={1.25}
               strokeLinejoin="round"
@@ -1182,7 +1182,7 @@ function GraphSVG({
                   width={lblWidth}
                   height={14}
                   rx={3}
-                  fill="#FFFFFF"
+                  fill="var(--bg-elev)"
                   stroke="var(--line)"
                   strokeWidth={0.75}
                 />

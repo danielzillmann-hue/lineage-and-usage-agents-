@@ -231,8 +231,8 @@ function RoiStat({
     <div
       style={{
         padding: 16,
-        background: emphasised ? "#E8F5E9" : "var(--bg-elev)",
-        border: `1px solid ${emphasised ? "#388E3C" : "var(--line)"}`,
+        background: emphasised ? "var(--soft-ok-bg)" : "var(--bg-elev)",
+        border: `1px solid ${emphasised ? "var(--soft-ok-bd)" : "var(--line)"}`,
         borderRadius: 6,
       }}
     >
@@ -242,7 +242,7 @@ function RoiStat({
         style={{
           fontSize: 22,
           fontWeight: 600,
-          color: emphasised ? "#1B5E20" : "var(--ink)",
+          color: emphasised ? "var(--soft-ok-fg)" : "var(--ink)",
           marginTop: 4,
         }}
       >

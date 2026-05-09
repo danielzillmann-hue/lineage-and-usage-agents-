@@ -32,6 +32,21 @@
   --crit-bg: #F8E3DF;
   --info: #2E6FB4;
 
+  /* "Soft" status tones — tinted card backgrounds with paired foreground
+     and border colors. Used by emphasis cards, badges, and inline alerts.
+     Each pair is a complete swap on light↔dark. */
+  --soft-ok-bg:   #E8F5E9; --soft-ok-fg:   #1B5E20; --soft-ok-bd:   #388E3C;
+  --soft-warn-bg: #FFF3E0; --soft-warn-fg: #E65100; --soft-warn-bd: #F57C00;
+  --soft-crit-bg: #FFEBEE; --soft-crit-fg: #B71C1C; --soft-crit-bd: #C62828;
+  --soft-info-bg: #E1F5FE; --soft-info-fg: #01579B; --soft-info-bd: #0288D1;
+
+  /* Inverted button surface: solid dark bg with light text. In dark mode
+     this swaps to a solid light bg with dark text so primary actions
+     stay visible against the dark canvas. */
+  --invert-bg: #1F1F1F;
+  --invert-fg: #FFFFFF;
+  --invert-bd: #1F1F1F;
+
   /* Radius / shadow */
   --r-sm: 4px;
   --r-md: 6px;
@@ -71,10 +86,22 @@
   --ink-3: #7E8E97;
   --ink-4: #56666F;
   --brand-emerald-100: #0E2A22;
+  --brand-ink: #E7EEF1;
   --warn-bg: #2A1E0E;
   --crit-bg: #2A1714;
   --shadow-1: 0 1px 0 rgba(0,0,0,0.4);
   --shadow-2: 0 1px 0 rgba(0,0,0,0.4), 0 8px 24px rgba(0,0,0,0.4);
+
+  /* Soft status tones — desaturated dark surfaces with light tinted text. */
+  --soft-ok-bg:   #0E2A22; --soft-ok-fg:   #6BD8AC; --soft-ok-bd:   #19543E;
+  --soft-warn-bg: #2A1E0E; --soft-warn-fg: #F0B860; --soft-warn-bd: #503A1F;
+  --soft-crit-bg: #2A1714; --soft-crit-fg: #F08D85; --soft-crit-bd: #5A2620;
+  --soft-info-bg: #0E2535; --soft-info-fg: #7CC0EA; --soft-info-bd: #1F4768;
+
+  /* Invert flips: dark mode primary action is a light surface. */
+  --invert-bg: #E7EEF1;
+  --invert-fg: #0B1419;
+  --invert-bd: #E7EEF1;
 }
 
 @theme {

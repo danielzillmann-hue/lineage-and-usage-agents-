@@ -25,7 +25,7 @@ const button = cva(
 );
 
 const VARIANTS: Record<string, React.CSSProperties> = {
-  primary:     { background: "var(--brand-ink)", color: "#FFFFFF", border: "1px solid var(--brand-ink)" },
+  primary:     { background: "var(--brand-ink)", color: "var(--invert-fg)", border: "1px solid var(--brand-ink)" },
   secondary:   { background: "var(--bg-elev)", color: "var(--ink)", border: "1px solid var(--line)" },
   ghost:       { background: "transparent", color: "var(--ink-2)", border: "1px solid transparent" },
   outline:     { background: "transparent", color: "var(--ink)", border: "1px solid var(--line)" },

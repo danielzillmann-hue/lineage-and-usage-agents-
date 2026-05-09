@@ -121,8 +121,9 @@ export function AskView({ runId }: { runId: string }) {
             <div
               style={{
                 width: 28, height: 28, borderRadius: 14, flexShrink: 0,
-                background: turn.role === "user" ? "var(--brand-emerald)" : "#1F1F1F",
-                color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+                background: turn.role === "user" ? "var(--brand-emerald)" : "var(--invert-bg)",
+                color: turn.role === "user" ? "#FFFFFF" : "var(--invert-fg)",
+                display: "flex", alignItems: "center", justifyContent: "center",
                 fontSize: 11, fontWeight: 600,
               }}
             >
@@ -133,7 +134,7 @@ export function AskView({ runId }: { runId: string }) {
                 flex: 1, maxWidth: "80%",
                 padding: "10px 14px",
                 background: turn.role === "user" ? "var(--brand-emerald)" : "var(--bg)",
-                color: turn.role === "user" ? "#fff" : "var(--ink)",
+                color: turn.role === "user" ? "#FFFFFF" : "var(--ink)",
                 border: turn.role === "user" ? "none" : "1px solid var(--line)",
                 borderRadius: 8,
                 fontSize: 13.5, lineHeight: 1.55,
@@ -167,7 +168,7 @@ export function AskView({ runId }: { runId: string }) {
             <div
               style={{
                 width: 28, height: 28, borderRadius: 14,
-                background: "#1F1F1F", color: "#fff",
+                background: "var(--invert-bg)", color: "var(--invert-fg)",
                 display: "flex", alignItems: "center", justifyContent: "center",
               }}
             >

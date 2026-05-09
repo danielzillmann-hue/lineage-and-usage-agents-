@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter_Tight, JetBrains_Mono, Source_Serif_4 } from "next/font/google";
 import { SiteHeader } from "@/components/site/SiteHeader";
+import { themeInitScript } from "@/lib/theme";
 import "./globals.css";
 
 const interTight = Inter_Tight({
@@ -27,7 +28,15 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${interTight.variable} ${jetbrainsMono.variable} ${sourceSerif.variable}`}>
+    <html
+      lang="en"
+      className={`${interTight.variable} ${jetbrainsMono.variable} ${sourceSerif.variable}`}
+      suppressHydrationWarning
+    >
+      <head>
+        {/* Sets data-theme on <html> before paint to avoid a light/dark flash. */}
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body className="min-h-screen flex flex-col">
         <SiteHeader />
         <main className="flex-1 flex flex-col">{children}</main>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Wordmark } from "./Brand";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function SiteHeader() {
   const pathname = usePathname();
@@ -51,6 +52,7 @@ export function SiteHeader() {
           Runs
         </Link>
         <span style={{ color: "var(--ink-2)" }}>Docs</span>
+        <ThemeToggle />
       </nav>
     </header>
   );

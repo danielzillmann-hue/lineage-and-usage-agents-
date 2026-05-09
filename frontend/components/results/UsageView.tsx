@@ -84,13 +84,13 @@ export function UsageView({ usage, inventory }: { usage?: UsageReport; inventory
           <CardContent className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={topReads} layout="vertical" margin={{ top: 5, right: 16, left: 60, bottom: 5 }}>
-                <CartesianGrid stroke="#16204a" horizontal={false} />
-                <XAxis type="number" stroke="#6471a0" fontSize={10} tickLine={false} axisLine={false} />
-                <YAxis dataKey="name" type="category" stroke="#97a3c2" fontSize={11} tickLine={false} axisLine={false} width={120} />
+                <CartesianGrid stroke="var(--line)" horizontal={false} />
+                <XAxis type="number" stroke="var(--ink-3)" fontSize={10} tickLine={false} axisLine={false} />
+                <YAxis dataKey="name" type="category" stroke="var(--ink-2)" fontSize={11} tickLine={false} axisLine={false} width={120} />
                 <Tooltip
                   cursor={{ fill: "rgba(0,180,240,0.07)" }}
-                  contentStyle={{ background: "#0c1530", border: "1px solid #1f2c5a", borderRadius: 8, fontSize: 12 }}
-                  labelStyle={{ color: "#fff" }}
+                  contentStyle={{ background: "var(--bg-elev)", border: "1px solid var(--line)", borderRadius: 8, fontSize: 12, color: "var(--ink)" }}
+                  labelStyle={{ color: "var(--ink)" }}
                 />
                 <Bar dataKey="reads" radius={[0, 4, 4, 0]}>
                   {topReads.map((_, i) => (

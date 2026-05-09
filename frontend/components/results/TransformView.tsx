@@ -14,10 +14,10 @@ import type { TransformManifestResponse, ValidationSummary, PushResultResponse }
 type FileKind = "primary" | "operations" | "sources" | "meta";
 
 const KIND_STYLES: Record<FileKind, { fg: string; bg: string; border: string }> = {
-  primary:    { fg: "#1B5E20", bg: "#E8F5E9", border: "#388E3C" },
-  operations: { fg: "#E65100", bg: "#FFF3E0", border: "#F57C00" },
-  sources:    { fg: "#01579B", bg: "#E1F5FE", border: "#0288D1" },
-  meta:       { fg: "var(--ink-3)", bg: "var(--bg-sunk)", border: "var(--line)" },
+  primary:    { fg: "var(--soft-ok-fg)",   bg: "var(--soft-ok-bg)",   border: "var(--soft-ok-bd)" },
+  operations: { fg: "var(--soft-warn-fg)", bg: "var(--soft-warn-bg)", border: "var(--soft-warn-bd)" },
+  sources:    { fg: "var(--soft-info-fg)", bg: "var(--soft-info-bg)", border: "var(--soft-info-bd)" },
+  meta:       { fg: "var(--ink-3)",        bg: "var(--bg-sunk)",      border: "var(--line)" },
 };
 
 
@@ -44,9 +44,9 @@ const paneStyle: React.CSSProperties = {
 
 
 const CONF_COLORS: Record<"high" | "medium" | "low", { fg: string; bg: string; label: string }> = {
-  high:   { fg: "#1B5E20", bg: "#E8F5E9", label: "high" },
-  medium: { fg: "#E65100", bg: "#FFF3E0", label: "med"  },
-  low:    { fg: "#B71C1C", bg: "#FFEBEE", label: "low"  },
+  high:   { fg: "var(--soft-ok-fg)",   bg: "var(--soft-ok-bg)",   label: "high" },
+  medium: { fg: "var(--soft-warn-fg)", bg: "var(--soft-warn-bg)", label: "med"  },
+  low:    { fg: "var(--soft-crit-fg)", bg: "var(--soft-crit-bg)", label: "low"  },
 };
 
 
@@ -126,8 +126,8 @@ function PushToGithubModal({
         <label style={{
           display: "flex", alignItems: "flex-start", gap: 10,
           marginBottom: 14, padding: 10,
-          background: asPR ? "#E8F5E9" : "var(--bg-elev)",
-          border: `1px solid ${asPR ? "#388E3C" : "var(--line)"}`,
+          background: asPR ? "var(--soft-ok-bg)" : "var(--bg-elev)",
+          border: `1px solid ${asPR ? "var(--soft-ok-bd)" : "var(--line)"}`,
           borderRadius: 4, cursor: "pointer",
         }}>
           <input
@@ -137,7 +137,7 @@ function PushToGithubModal({
             style={{ marginTop: 2, accentColor: "var(--brand-emerald)" }}
           />
           <div>
-            <div style={{ fontSize: 12.5, fontWeight: 500, color: asPR ? "#1B5E20" : "var(--ink)" }}>
+            <div style={{ fontSize: 12.5, fontWeight: 500, color: asPR ? "var(--soft-ok-fg)" : "var(--ink)" }}>
               Open as pull request
             </div>
             <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2, lineHeight: 1.4 }}>
@@ -180,8 +180,8 @@ function PushToGithubModal({
             style={{
               display: "inline-flex", alignItems: "center", gap: 6,
               padding: "6px 16px", fontSize: 13, fontWeight: 500,
-              background: pushing || !repoUrl || !token ? "var(--ink-4)" : "#1F1F1F",
-              color: "#fff", border: 0, borderRadius: 6,
+              background: pushing || !repoUrl || !token ? "var(--ink-4)" : "var(--invert-bg)",
+              color: "var(--invert-fg)", border: 0, borderRadius: 6,
               cursor: pushing || !repoUrl || !token ? "not-allowed" : "pointer",
             }}
           >
@@ -405,8 +405,8 @@ export function TransformView({ runId }: { runId: string }) {
           onClick={() => setPushResult(null)}
           style={{
             position: "fixed", top: 16, right: 16, zIndex: 100,
-            padding: "12px 16px", background: "#E8F5E9", color: "#1B5E20",
-            border: "1px solid #388E3C", borderRadius: 6, fontSize: 13,
+            padding: "12px 16px", background: "var(--soft-ok-bg)", color: "var(--soft-ok-fg)",
+            border: "1px solid var(--soft-ok-bd)", borderRadius: 6, fontSize: 13,
             cursor: "pointer", maxWidth: 480,
           }}
         >
@@ -415,7 +415,7 @@ export function TransformView({ runId }: { runId: string }) {
             <>
               Opened PR with {pushResult.files_pushed} files —{" "}
               <a href={pushResult.pull_request_url} target="_blank" rel="noreferrer"
-                 style={{ color: "#1B5E20", textDecoration: "underline" }}
+                 style={{ color: "var(--soft-ok-fg)", textDecoration: "underline" }}
                  onClick={(e) => e.stopPropagation()}>
                 {pushResult.repo_url.replace("https://github.com/", "")}#{pushResult.pull_request_number}
                 <ExternalLink className="h-3 w-3 inline ml-1" strokeWidth={1.5} />
@@ -425,7 +425,7 @@ export function TransformView({ runId }: { runId: string }) {
             <>
               Pushed {pushResult.files_pushed} files to{" "}
               <a href={pushResult.commit_url} target="_blank" rel="noreferrer"
-                 style={{ color: "#1B5E20", textDecoration: "underline" }}
+                 style={{ color: "var(--soft-ok-fg)", textDecoration: "underline" }}
                  onClick={(e) => e.stopPropagation()}>
                 {pushResult.repo_url.replace("https://github.com/", "")}@{pushResult.commit_sha.slice(0, 7)}
                 <ExternalLink className="h-3 w-3 inline ml-1" strokeWidth={1.5} />
@@ -450,7 +450,7 @@ export function TransformView({ runId }: { runId: string }) {
             style={{
               display: "inline-flex", alignItems: "center", gap: 6,
               padding: "6px 12px", fontSize: 12.5, fontWeight: 500,
-              background: "var(--brand-emerald)", color: "#fff",
+              background: "var(--brand-emerald)", color: "#FFFFFF",
               borderRadius: 6, textDecoration: "none",
             }}
           >
@@ -501,7 +501,7 @@ export function TransformView({ runId }: { runId: string }) {
             display: "inline-flex", alignItems: "center", gap: 6,
             width: "100%", justifyContent: "center",
             marginBottom: 18, padding: "8px 12px", fontSize: 12.5, fontWeight: 500,
-            background: "#1F1F1F", color: "#fff",
+            background: "var(--invert-bg)", color: "var(--invert-fg)",
             border: 0, borderRadius: 6, cursor: "pointer",
           }}
           title="Commit + push the generated project to a GitHub repo"
@@ -534,9 +534,9 @@ export function TransformView({ runId }: { runId: string }) {
               title="Show only files with confidence < 70 (manual review queue)"
               style={{
                 fontSize: 10.5, padding: "2px 8px",
-                background: reviewOnly ? "#FFEBEE" : "transparent",
-                color: reviewOnly ? "#B71C1C" : "var(--ink-3)",
-                border: `1px solid ${reviewOnly ? "#B71C1C" : "var(--line)"}`,
+                background: reviewOnly ? "var(--soft-crit-bg)" : "transparent",
+                color: reviewOnly ? "var(--soft-crit-fg)" : "var(--ink-3)",
+                border: `1px solid ${reviewOnly ? "var(--soft-crit-bd)" : "var(--line)"}`,
                 borderRadius: 99, cursor: "pointer", fontFamily: "var(--font-mono)",
               }}
             >
@@ -616,8 +616,8 @@ export function TransformView({ runId }: { runId: string }) {
                   onClick={() => setSplitView((v) => !v)}
                   style={{
                     padding: "6px 12px", fontSize: 12,
-                    background: splitView ? "var(--ink)" : "var(--bg-elev)",
-                    color: splitView ? "#fff" : "var(--ink-2)",
+                    background: splitView ? "var(--invert-bg)" : "var(--bg-elev)",
+                    color: splitView ? "var(--invert-fg)" : "var(--ink-2)",
                     border: "1px solid var(--line)", borderRadius: 6,
                     cursor: "pointer", fontFamily: "var(--font-sans)",
                   }}
@@ -678,8 +678,8 @@ function ValidationPanel({
   if (validation.ok) {
     return (
       <div style={{
-        padding: 10, marginBottom: 16, background: "#E8F5E9",
-        borderRadius: 4, fontSize: 12, color: "#1B5E20",
+        padding: 10, marginBottom: 16, background: "var(--soft-ok-bg)",
+        borderRadius: 4, fontSize: 12, color: "var(--soft-ok-fg)",
         display: "flex", alignItems: "center", gap: 8,
       }}>
         <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0" strokeWidth={1.5} />

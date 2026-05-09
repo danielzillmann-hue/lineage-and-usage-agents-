@@ -467,7 +467,7 @@ const btnPrimary: React.CSSProperties = {
   display: "inline-flex", alignItems: "center", gap: 8,
   fontFamily: "var(--font-sans)", fontSize: 14, fontWeight: 500, lineHeight: 1,
   padding: "10px 14px", borderRadius: "var(--r-md)",
-  background: "var(--brand-ink)", color: "#FFFFFF", border: "1px solid var(--brand-ink)",
+  background: "var(--brand-ink)", color: "var(--invert-fg)", border: "1px solid var(--brand-ink)",
   cursor: "pointer", transition: "background .15s, border-color .15s",
 };
 
