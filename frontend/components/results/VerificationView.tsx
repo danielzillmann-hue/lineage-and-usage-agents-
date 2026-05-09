@@ -14,14 +14,29 @@ import type {
 } from "@/lib/api";
 import type { OracleConnection } from "@/lib/types";
 
+// Display-only status: "bq_output" is shown when a BQ-derived table has no
+// Oracle counterpart by design (the migration produced something new). Wire
+// status from the backend is still `missing_in_oracle` — we just relabel it
+// at the UI layer so the demo audience reads it as a deliberate output, not
+// a missing comparison.
+type DisplayStatus = VerifyStatus | "bq_output";
+
+function displayStatusOf(t: TableComparison): DisplayStatus {
+  if (t.classification === "bq_derived" && t.status === "missing_in_oracle") {
+    return "bq_output";
+  }
+  return t.status;
+}
+
 const STATUS_META: Record<
-  VerifyStatus,
+  DisplayStatus,
   { label: string; tone: "ok" | "warn" | "crit" | "info" | "neutral"; Icon: typeof CheckCircle2 }
 > = {
   match:              { label: "Match",              tone: "ok",      Icon: CheckCircle2 },
   drift:              { label: "Drift",              tone: "warn",    Icon: AlertTriangle },
   missing_in_bq:      { label: "Missing in BQ",      tone: "crit",    Icon: AlertCircle },
   missing_in_oracle:  { label: "Missing in Oracle",  tone: "info",    Icon: Info },
+  bq_output:          { label: "BQ output",          tone: "info",    Icon: Database },
   missing_both:       { label: "Missing both",       tone: "crit",    Icon: AlertCircle },
   skipped:            { label: "Skipped",            tone: "neutral", Icon: Info },
   error:              { label: "Error",              tone: "crit",    Icon: AlertCircle },
@@ -49,7 +64,7 @@ export function VerificationView({ runId }: { runId: string }) {
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [needsCreds, setNeedsCreds] = useState(false);
-  const [filter, setFilter] = useState<"all" | VerifyStatus>("all");
+  const [filter, setFilter] = useState<"all" | DisplayStatus>("all");
 
   useEffect(() => {
     setLoading(true);
@@ -124,19 +139,28 @@ export function VerificationView({ runId }: { runId: string }) {
   }
 
   const summary = report.summary;
+  // Recompute counts using the display-status mapping so BQ-derived
+  // outputs land in their own bucket instead of "Missing in Oracle".
+  const counts: Record<DisplayStatus, number> = {
+    match: 0, drift: 0, missing_in_bq: 0, missing_in_oracle: 0,
+    bq_output: 0, missing_both: 0, skipped: 0, error: 0,
+  };
+  for (const t of report.tables) counts[displayStatusOf(t)] += 1;
+
   const tables = filter === "all"
     ? report.tables
-    : report.tables.filter((t) => t.status === filter);
+    : report.tables.filter((t) => displayStatusOf(t) === filter);
 
   return (
     <div className="space-y-6">
       {/* Header summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <SummaryCard label="Total" value={summary.total} tone="neutral" />
-        <SummaryCard label="Match"   value={summary.matched}  tone="ok" />
-        <SummaryCard label="Drift"   value={summary.drifted}  tone="warn" />
-        <SummaryCard label="Missing" value={summary.missing}  tone="crit" />
-        <SummaryCard label="Skipped" value={summary.skipped}  tone="neutral" />
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+        <SummaryCard label="Total"       value={summary.total}                                   tone="neutral" />
+        <SummaryCard label="Match"       value={counts.match}                                    tone="ok" />
+        <SummaryCard label="Drift"       value={counts.drift}                                    tone="warn" />
+        <SummaryCard label="BQ output"   value={counts.bq_output}                                tone="info" />
+        <SummaryCard label="Missing"     value={counts.missing_in_bq + counts.missing_both}      tone="crit" />
+        <SummaryCard label="Skipped"     value={counts.skipped + counts.missing_in_oracle}       tone="neutral" />
       </div>
 
       {/* Header copy */}
@@ -162,7 +186,7 @@ export function VerificationView({ runId }: { runId: string }) {
           <FilterPills
             value={filter}
             onChange={setFilter}
-            counts={summary.by_status as Record<VerifyStatus, number>}
+            counts={counts}
           />
           {!needsCreds && (
             <RunButton onClick={() => triggerVerify()} running={running} compact />
@@ -403,14 +427,15 @@ function SummaryCard({
 function FilterPills({
   value, onChange, counts,
 }: {
-  value: "all" | VerifyStatus;
-  onChange: (v: "all" | VerifyStatus) => void;
-  counts: Record<VerifyStatus, number>;
+  value: "all" | DisplayStatus;
+  onChange: (v: "all" | DisplayStatus) => void;
+  counts: Record<DisplayStatus, number>;
 }) {
-  const pills: { key: "all" | VerifyStatus; label: string; count?: number }[] = [
+  const pills: { key: "all" | DisplayStatus; label: string; count?: number }[] = [
     { key: "all", label: "All" },
     { key: "match", label: "Match", count: counts.match },
     { key: "drift", label: "Drift", count: counts.drift },
+    { key: "bq_output", label: "BQ output", count: counts.bq_output },
     { key: "missing_in_bq", label: "Missing in BQ", count: counts.missing_in_bq },
     { key: "missing_in_oracle", label: "Missing in Oracle", count: counts.missing_in_oracle },
     { key: "skipped", label: "Skipped", count: counts.skipped },
@@ -455,7 +480,7 @@ function FilterPills({
 
 function TableRow({ table }: { table: TableComparison }) {
   const [expanded, setExpanded] = useState(false);
-  const meta = STATUS_META[table.status];
+  const meta = STATUS_META[displayStatusOf(table)];
   const Icon = meta.Icon;
   const color = TONE_COLOR[meta.tone];
   const hasDetails = table.column_diffs.length > 0 || !!table.error;
