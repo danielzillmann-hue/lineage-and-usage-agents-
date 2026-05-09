@@ -40,7 +40,11 @@ class RunRequest(BaseModel):
     prefix: str = ""
     outputs_prefix: str | None = None  # if None, no separate outputs scan
     documents_prefix: str | None = None  # delivery specs for cross-check
-    agents: list[AgentName] = Field(default_factory=lambda: list(AgentName))
+    agents: list[AgentName] = Field(
+        default_factory=lambda: [
+            a for a in AgentName if a is not AgentName.VERIFY
+        ],
+    )
     label: str | None = None
 
 

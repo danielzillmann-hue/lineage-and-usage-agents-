@@ -68,6 +68,11 @@ export const api = {
   // ─── Verify tab ──────────────────────────────────────────────────
   verifyReport: (id: string) =>
     jfetch<VerificationReport>(`/api/runs/${id}/verify`),
+  verifyTrigger: (id: string) =>
+    jfetch<{ summary: VerificationReport["summary"]; report_path: string }>(
+      `/api/runs/${id}/verify`,
+      { method: "POST" },
+    ),
   chat: (id: string, body: ChatRequest) =>
     jfetch<ChatResponse>(`/api/runs/${id}/chat`, {
       method: "POST",

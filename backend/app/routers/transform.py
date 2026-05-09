@@ -398,20 +398,15 @@ def download_zip(run_id: str) -> Response:
 # ─── Verification endpoints ─────────────────────────────────────────────
 
 
-class VerifyRequest(BaseModel):
-    """Trigger an on-demand verification run. Reuses the run's stored
-    Oracle connection (from the original RunRequest).
-    """
-    pass
-
-
 @router.post("/{run_id}/verify")
 async def trigger_verify(run_id: str) -> dict:
-    """Run the verification agent on demand against the run's existing
-    Oracle connection + the materialised BigQuery tables.
+    """Run the verification agent on demand. Re-uses the Oracle creds the
+    run was originally created with (cached in orchestrator memory) and
+    queries the BigQuery tables the user has materialised via Dataform.
+    Streams progress through the existing run channel.
     """
     from app.services import store
-    from app.services.orchestrator import _emit
+    from app.services.orchestrator import get_run_request, _emit
     from app.agents import verification_agent
     from app.models.schema import RunResults
 
@@ -419,17 +414,33 @@ async def trigger_verify(run_id: str) -> dict:
     if run is None:
         raise HTTPException(404, f"run {run_id} not found")
 
-    # Rebuild a minimal RunRequest carrying the Oracle credentials. We
-    # don't have the original creds in the Run object, so the user must
-    # have triggered this through the orchestrator (which keeps the
-    # creds in the orchestrator's queue) — for the demo we accept that
-    # this endpoint requires the run to still be in-process. Future:
-    # store the creds in Secret Manager keyed by run_id.
-    raise HTTPException(
-        501,
-        "Standalone verify endpoint not implemented — "
-        "use the agent in the standard run flow (re-run with VERIFY in agents list).",
-    )
+    req = get_run_request(run_id)
+    if req is None:
+        raise HTTPException(
+            409,
+            "Oracle credentials for this run are not cached anymore "
+            "(the backend has restarted since the run was created). "
+            "Start a new analysis, deploy the Dataform project, then "
+            "trigger Verify.",
+        )
+    if req.oracle is None:
+        raise HTTPException(
+            400, "This run was created without an Oracle connection.",
+        )
+
+    # Inventory metadata is needed to classify CSV stubs vs Oracle-origin
+    # sources; load whatever's in storage for the run.
+    results = (await store.get_results(run_id)) or RunResults()
+
+    try:
+        await verification_agent.run(req, results, _emit(run_id), run_id)
+    except Exception as e:  # noqa: BLE001
+        log.exception("verify failed for run %s", run_id)
+        raise HTTPException(
+            500, f"verify failed: {type(e).__name__}: {e}",
+        ) from e
+
+    return verification_agent.last_result or {"summary": {}, "report_path": ""}
 
 
 @router.get("/{run_id}/verify")

@@ -45,6 +45,8 @@ export function VerificationView({ runId }: { runId: string }) {
   const [report, setReport] = useState<VerificationReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | VerifyStatus>("all");
 
   useEffect(() => {
@@ -54,6 +56,21 @@ export function VerificationView({ runId }: { runId: string }) {
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
   }, [runId]);
+
+  const triggerVerify = async () => {
+    setRunning(true);
+    setRunError(null);
+    try {
+      await api.verifyTrigger(runId);
+      const fresh = await api.verifyReport(runId);
+      setReport(fresh);
+      setError(null);
+    } catch (e) {
+      setRunError(String(e));
+    } finally {
+      setRunning(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -71,11 +88,18 @@ export function VerificationView({ runId }: { runId: string }) {
           <p className="mb-2 text-[14px]" style={{ color: "var(--ink-2)" }}>
             No verification report yet for this run.
           </p>
-          <p className="text-[12.5px]" style={{ color: "var(--ink-3)", maxWidth: 540, margin: "0 auto" }}>
-            The Verify agent runs after the Dataform pipelines have executed
-            in BigQuery. Make sure the run included the <span className="mono">verify</span>{" "}
-            agent and that the Dataform run has completed end-to-end.
+          <p className="mb-5 text-[12.5px]" style={{ color: "var(--ink-3)", maxWidth: 540, margin: "0 auto" }}>
+            Run this <em>after</em> you've pushed the generated Dataform project
+            to GitHub, set up the Dataform workspace, and executed the
+            pipelines in BigQuery — verification compares Oracle to whatever
+            is actually in BQ right now.
           </p>
+          <RunButton onClick={triggerVerify} running={running} />
+          {runError && (
+            <p className="mt-4 text-[12px] mono" style={{ color: "var(--crit)", maxWidth: 600, margin: "12px auto 0" }}>
+              {runError}
+            </p>
+          )}
         </CardContent>
       </Card>
     );
@@ -116,12 +140,20 @@ export function VerificationView({ runId }: { runId: string }) {
             <span className="mono">{report.derived_dataset}</span>
           </p>
         </div>
-        <FilterPills
-          value={filter}
-          onChange={setFilter}
-          counts={summary.by_status as Record<VerifyStatus, number>}
-        />
+        <div className="flex items-center gap-3 flex-wrap">
+          <FilterPills
+            value={filter}
+            onChange={setFilter}
+            counts={summary.by_status as Record<VerifyStatus, number>}
+          />
+          <RunButton onClick={triggerVerify} running={running} compact />
+        </div>
       </div>
+      {runError && (
+        <div className="text-[12px] mono" style={{ color: "var(--crit)" }}>
+          {runError}
+        </div>
+      )}
 
       {/* Table list */}
       {tables.length === 0 ? (
@@ -138,6 +170,37 @@ export function VerificationView({ runId }: { runId: string }) {
     </div>
   );
 }
+
+function RunButton({
+  onClick, running, compact,
+}: { onClick: () => void; running: boolean; compact?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={running}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        padding: compact ? "6px 12px" : "9px 18px",
+        fontSize: compact ? 12 : 13,
+        fontWeight: 500,
+        background: running ? "var(--bg-elev)" : "var(--ink)",
+        color: running ? "var(--ink-3)" : "var(--bg)",
+        border: "1px solid var(--ink)",
+        borderRadius: "var(--r-md)",
+        cursor: running ? "default" : "pointer",
+        opacity: running ? 0.7 : 1,
+      }}
+    >
+      {running
+        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        : <CheckCircle2 className="h-3.5 w-3.5" />}
+      {running ? "Comparing…" : compact ? "Re-run verification" : "Run verification"}
+    </button>
+  );
+}
+
 
 function SummaryCard({
   label, value, tone,

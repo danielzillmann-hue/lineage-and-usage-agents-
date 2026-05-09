@@ -27,6 +27,17 @@ log = logging.getLogger(__name__)
 
 _QUEUES: dict[str, asyncio.Queue[StreamEvent]] = {}
 
+# Original RunRequest cached per run so on-demand actions (like the
+# Verify agent, which can only run after the user has manually deployed
+# the Dataform project to BigQuery) can re-use the Oracle credentials
+# that the run was started with. In-memory only — for production, push
+# creds through Secret Manager.
+_REQUESTS: dict[str, RunRequest] = {}
+
+
+def get_run_request(run_id: str) -> RunRequest | None:
+    return _REQUESTS.get(run_id)
+
 
 def _queue(run_id: str) -> asyncio.Queue[StreamEvent]:
     return _QUEUES.setdefault(run_id, asyncio.Queue())
@@ -58,6 +69,7 @@ async def create_run(req: RunRequest) -> Run:
         agents=[AgentRunState(name=a) for a in req.agents],
     )
     await store.upsert_run(run)
+    _REQUESTS[run.id] = req
     asyncio.create_task(_execute(run.id, req))
     return run
 
@@ -130,9 +142,9 @@ async def _execute(run_id: str, req: RunRequest) -> None:
     if AgentName.ORCHESTRATION in req.agents:
         await _safe(AgentName.ORCHESTRATION,
                     lambda: orchestration_agent.run(req, results, _emit(run_id), run_id))
-    if AgentName.VERIFY in req.agents:
-        await _safe(AgentName.VERIFY,
-                    lambda: verification_agent.run(req, results, _emit(run_id), run_id))
+    # VERIFY runs on demand from the UI's "Run verification" button after
+    # the user has pushed the Dataform project + executed the pipelines
+    # in BigQuery. Running it here would always show empty BQ tables.
 
     run.status = "failed" if any_failed else "completed"
     await store.upsert_run(run)
