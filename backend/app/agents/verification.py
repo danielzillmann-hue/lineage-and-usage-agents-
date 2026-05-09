@@ -413,8 +413,11 @@ def _bq_column_aggregates(
         select_parts.append(
             f"COUNTIF(`{nm}` IS NULL) AS `null__{nm}`"
         )
+        # Exact COUNT(DISTINCT) so the BQ side matches Oracle's exact
+        # count; APPROX_COUNT_DISTINCT introduces ~1% HLL noise that
+        # shows up as false-positive drift in the report.
         select_parts.append(
-            f"APPROX_COUNT_DISTINCT(`{nm}`) AS `distinct__{nm}`"
+            f"COUNT(DISTINCT `{nm}`) AS `distinct__{nm}`"
         )
         keys = ["null_count", "distinct_count"]
         if ty in ("INT64", "INTEGER", "NUMERIC", "BIGNUMERIC", "FLOAT64", "FLOAT"):
