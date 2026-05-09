@@ -393,3 +393,57 @@ def download_zip(run_id: str) -> Response:
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ─── Verification endpoints ─────────────────────────────────────────────
+
+
+class VerifyRequest(BaseModel):
+    """Trigger an on-demand verification run. Reuses the run's stored
+    Oracle connection (from the original RunRequest).
+    """
+    pass
+
+
+@router.post("/{run_id}/verify")
+async def trigger_verify(run_id: str) -> dict:
+    """Run the verification agent on demand against the run's existing
+    Oracle connection + the materialised BigQuery tables.
+    """
+    from app.services import store
+    from app.services.orchestrator import _emit
+    from app.agents import verification_agent
+    from app.models.schema import RunResults
+
+    run = await store.get_run(run_id)
+    if run is None:
+        raise HTTPException(404, f"run {run_id} not found")
+
+    # Rebuild a minimal RunRequest carrying the Oracle credentials. We
+    # don't have the original creds in the Run object, so the user must
+    # have triggered this through the orchestrator (which keeps the
+    # creds in the orchestrator's queue) — for the demo we accept that
+    # this endpoint requires the run to still be in-process. Future:
+    # store the creds in Secret Manager keyed by run_id.
+    raise HTTPException(
+        501,
+        "Standalone verify endpoint not implemented — "
+        "use the agent in the standard run flow (re-run with VERIFY in agents list).",
+    )
+
+
+@router.get("/{run_id}/verify")
+def get_verify_report(run_id: str) -> dict:
+    """Return the verification report for a run, if one was produced."""
+    settings = get_settings()
+    try:
+        text = gcs.read_text(
+            settings.results_bucket,
+            f"runs/{run_id}/verification/_report.json",
+        )
+    except Exception:
+        raise HTTPException(404, f"no verification report for run {run_id}")
+    try:
+        return json.loads(text)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"verification report is malformed: {e}")

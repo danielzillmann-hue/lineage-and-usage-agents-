@@ -4,3 +4,4 @@ from app.agents import orchestration as orchestration_agent  # noqa: F401
 from app.agents import summary as summary_agent  # noqa: F401
 from app.agents import transformation as transformation_agent  # noqa: F401
 from app.agents import usage as usage_agent  # noqa: F401
+from app.agents import verification as verification_agent  # noqa: F401

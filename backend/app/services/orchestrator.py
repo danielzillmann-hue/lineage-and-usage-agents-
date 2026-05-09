@@ -16,6 +16,7 @@ from app.agents import (
     summary_agent,
     transformation_agent,
     usage_agent,
+    verification_agent,
 )
 from app.models.run import AgentName, AgentRunState, AgentStatus, Run, RunRequest, StreamEvent
 from app.models.schema import RunResults
@@ -129,6 +130,9 @@ async def _execute(run_id: str, req: RunRequest) -> None:
     if AgentName.ORCHESTRATION in req.agents:
         await _safe(AgentName.ORCHESTRATION,
                     lambda: orchestration_agent.run(req, results, _emit(run_id), run_id))
+    if AgentName.VERIFY in req.agents:
+        await _safe(AgentName.VERIFY,
+                    lambda: verification_agent.run(req, results, _emit(run_id), run_id))
 
     run.status = "failed" if any_failed else "completed"
     await store.upsert_run(run)
