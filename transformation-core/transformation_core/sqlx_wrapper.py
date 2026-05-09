@@ -73,9 +73,15 @@ def _build_config(graph: DataflowGraph) -> str:
     if graph.schema:
         lines.append(f'  schema: "{graph.schema}",')
 
-    # Name (target table)
-    if graph.target.target_table:
-        name = _sanitize_sqlx_name(graph.target.target_table)
+    # Name — use mapping_name (== the SQLX file stem) rather than the
+    # target table name. Two XML pipelines can write to the same target
+    # table (e.g. accounts_summary.xml and final_accounts_extract.xml
+    # both producing `accounts_summary`); using target_table makes both
+    # files emit `name: "accounts_summary"`, which Dataform rejects as a
+    # duplicate canonical target. mapping_name is unique per emitted file.
+    raw_name = graph.mapping_name or graph.target.target_table
+    if raw_name:
+        name = _sanitize_sqlx_name(raw_name)
         lines.append(f'  name: "{name}",')
 
     # Tags

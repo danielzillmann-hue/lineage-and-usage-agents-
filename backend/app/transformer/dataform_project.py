@@ -257,7 +257,7 @@ def _build_source_files(
     for s in sources:
         view_sql = views.get(s.lower())
         if view_sql:
-            body = _view_block(s, view_sql)
+            body = _view_block(s, view_sql, config)
             header = (
                 "-- Source view ported from Oracle to BigQuery by intelia\n"
                 "-- Lineage & Usage Agents.\n\n"
@@ -382,10 +382,15 @@ def _inject_assertions_into_sqlx(sqlx: str, metadata: dict) -> str:
     return sqlx[:close_idx + 1] + insertion + sqlx[close_idx + 1:]
 
 
-def _view_block(name: str, oracle_sql: str) -> str:
+def _view_block(name: str, oracle_sql: str, config: DataformProjectConfig) -> str:
     """Render a Dataform `type: "view"` block from the original Oracle
     CREATE VIEW SELECT body. Translates dialect to BigQuery and rewrites
     bare table refs to ${ref()} so the view's deps are tracked.
+
+    The view is created in the source dataset alongside the declaration
+    blocks. Without an explicit `schema:`, Dataform defaults to
+    `defaultDataset` and the view collides with any downstream primary
+    that produces a same-named table.
     """
     # Local import to avoid a circular dependency.
     from app.transformer.sql_helpers import render_dml_for_bigquery
@@ -393,6 +398,8 @@ def _view_block(name: str, oracle_sql: str) -> str:
     return (
         f"config {{\n"
         f'  type: "view",\n'
+        f'  database: "{config.gcp_project}",\n'
+        f'  schema: "{config.source_dataset}",\n'
         f'  name: "{name}",\n'
         f'  description: "Oracle view ported to BigQuery — translated from CREATE VIEW source.",\n'
         f"}}\n\n"
