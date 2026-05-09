@@ -38,10 +38,19 @@ def _prefix(run_id: str) -> str:
 
 
 def upload_project(run_id: str, project: AssembledProject) -> TransformManifest:
-    """Write the project files + a manifest to GCS. Returns the manifest."""
+    """Write the project files + a manifest to GCS. Returns the manifest.
+
+    The run prefix is cleared first so files emitted by a previous
+    generation that the current code no longer produces don't linger
+    and get picked up by `list_files()` / the GitHub push.
+    """
     settings = get_settings()
     bucket = settings.results_bucket
     prefix = _prefix(run_id)
+
+    deleted = gcs.delete_prefix(bucket, f"{prefix}/")
+    if deleted:
+        log.info("cleared %d stale file(s) under %s", deleted, prefix)
 
     for path, content in project.files.items():
         ct = "text/markdown" if path.endswith(".md") else (

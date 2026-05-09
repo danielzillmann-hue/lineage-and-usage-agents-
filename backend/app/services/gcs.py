@@ -127,3 +127,19 @@ def list_blobs(bucket: str, prefix: str) -> list[str]:
     """Return blob names under a prefix (no trailing slash needed)."""
     client = _client()
     return [b.name for b in client.list_blobs(bucket, prefix=prefix)]
+
+
+def delete_prefix(bucket: str, prefix: str) -> int:
+    """Delete every blob under `prefix`. Returns the count deleted.
+
+    Used to clear stale per-run state before re-uploading — without this,
+    files emitted by an earlier generation that the current code no
+    longer produces stay in the bucket and leak into downstream pushes.
+    """
+    client = _client()
+    bkt = client.bucket(bucket)
+    deleted = 0
+    for blob in client.list_blobs(bucket, prefix=prefix):
+        bkt.blob(blob.name).delete()
+        deleted += 1
+    return deleted
