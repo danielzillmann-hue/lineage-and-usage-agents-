@@ -116,13 +116,18 @@ def test_operations_dml_translated_to_bigquery():
     table refs wrapped with ${ref()}."""
     from app.transformer.sql_helpers import render_dml_for_bigquery
 
-    # SYSDATE → CURRENT_TIMESTAMP, target table → ${ref()}
+    # SYSDATE → CURRENT_DATETIME (matches our DATE→DATETIME column type
+    # mapping; CURRENT_TIMESTAMP would type-clash with DATETIME columns
+    # in comparisons). Date arithmetic on SYSDATE - N becomes
+    # DATETIME_SUB(..., INTERVAL N DAY).
     out = render_dml_for_bigquery(
         "UPDATE accounts SET status = 'X' WHERE open_date < SYSDATE - 365"
     )
     assert "${ref('accounts')}" in out
     assert "SYSDATE" not in out
-    assert "CURRENT_TIMESTAMP" in out
+    assert "CURRENT_DATETIME" in out
+    assert "DATETIME_SUB" in out
+    assert "INTERVAL 365 DAY" in out
 
     # DELETE FROM target wrapping
     out = render_dml_for_bigquery("DELETE FROM stg_daily_metrics")

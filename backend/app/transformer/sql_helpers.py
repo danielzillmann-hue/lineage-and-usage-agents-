@@ -56,6 +56,13 @@ def parse_select(sql: str, base_name: str) -> SelectChain | None:
     if not isinstance(tree, exp.Select):
         return None
 
+    # Apply Oracle→BQ AST patches up-front so every downstream
+    # `tree.sql(dialect="bigquery")` call (WHERE clauses, projections,
+    # custom-SQL paths) emits BQ-compatible SQL. Without this, the
+    # operations-only path catches translations like TRUNC(d) → DATETIME_TRUNC
+    # but SELECT bodies in primary SQLX still emit the raw Oracle form.
+    _patch_oracle_dialect_for_bigquery(tree)
+
     chain = SelectChain()
 
     # ─── 1. FROM clause: extract base table + any explicit JOINs ────────
@@ -73,7 +80,7 @@ def parse_select(sql: str, base_name: str) -> SelectChain | None:
     where_clause = tree.find(exp.Where)
     where_sql = ""
     if where_clause is not None:
-        where_sql = where_clause.this.sql(dialect="bigquery")
+        where_sql = _patch_bigquery_text(where_clause.this.sql(dialect="bigquery"))
 
     # If the SELECT has explicit JOINs, the original SQL has table aliases
     # referenced by every projection / WHERE / ON. Rebuilding from scratch
@@ -87,7 +94,7 @@ def parse_select(sql: str, base_name: str) -> SelectChain | None:
         # them across separate CTEs would orphan those aliases. So we emit
         # the entire SELECT (including GROUP BY) as one custom_sql source
         # and keep its projection list as the output schema.
-        custom = tree.sql(dialect="bigquery")
+        custom = _patch_bigquery_text(tree.sql(dialect="bigquery"))
         custom = _wrap_tables_with_ref(custom, tree)
         proj_columns: list[ColumnDef] = [_projection_to_columndef(p) for p in tree.expressions]
         src_node = SourceNode(
@@ -138,7 +145,7 @@ def _finalize_chain_with_aggregations(
         group_by_cols = []
         if group_clause is not None:
             for g in group_clause.expressions:
-                group_by_cols.append(g.sql(dialect="bigquery"))
+                group_by_cols.append(_patch_bigquery_text(g.sql(dialect="bigquery")))
 
         agg_columns: list[ColumnDef] = []
         for proj in tree.expressions:
@@ -187,14 +194,18 @@ def _projection_to_columndef(proj: exp.Expression) -> ColumnDef:
     """
     name = proj.alias_or_name
     if isinstance(proj, exp.Column):
-        return ColumnDef(name=name, expression=proj.sql(dialect="bigquery"), is_passthrough=True)
+        return ColumnDef(
+            name=name,
+            expression=_patch_bigquery_text(proj.sql(dialect="bigquery")),
+            is_passthrough=True,
+        )
     if isinstance(proj, exp.Alias):
-        inner = proj.this.sql(dialect="bigquery")
+        inner = _patch_bigquery_text(proj.this.sql(dialect="bigquery"))
         return ColumnDef(name=name, expression=inner)
     # Unaliased expression — sqlglot's alias_or_name returns the function
     # name (e.g. "TRUNC", "SUM") which collides on multi-aggregate SELECTs.
     # Caller may rename via INSERT target columns; placeholder for now.
-    expr_sql = proj.sql(dialect="bigquery")
+    expr_sql = _patch_bigquery_text(proj.sql(dialect="bigquery"))
     return ColumnDef(name=name or "col", expression=expr_sql)
 
 
@@ -409,6 +420,11 @@ def _patch_oracle_dialect_for_bigquery(tree: exp.Expression) -> None:
     renderer produces something BQ accepts.
 
     Targets:
+    - SYSDATE                     → CURRENT_DATETIME()
+      Oracle's SYSDATE is wall-clock with no timezone; sqlglot maps it to
+      CURRENT_TIMESTAMP() (TIMESTAMP) by default, which then fails when
+      compared to DATETIME columns. CURRENT_DATETIME() matches the type
+      the rest of our DATE-→-DATETIME mapping uses.
     - TRUNC(date_expr)            → DATETIME_TRUNC(date_expr, DAY)
     - TRUNC(date_expr, 'MM')      → DATETIME_TRUNC(date_expr, MONTH)
       (TRUNC's two-arg form is what sqlglot already maps to DATE_TRUNC,
@@ -417,6 +433,13 @@ def _patch_oracle_dialect_for_bigquery(tree: exp.Expression) -> None:
       Oracle treats numeric subtraction from a date as "N days ago"; BQ
       requires an explicit interval expression.
     """
+    # 0. SYSDATE → CURRENT_DATETIME(). sqlglot parses SYSDATE as a
+    #    CurrentTimestamp node with `sysdate=True`, which renders to
+    #    CURRENT_TIMESTAMP() (TIMESTAMP) — that fails when compared to
+    #    DATETIME columns (Oracle DATE → DATETIME in our type map).
+    for node in list(tree.find_all(exp.CurrentTimestamp)):
+        if node.args.get("sysdate"):
+            node.replace(exp.CurrentDatetime())
     # 1. TRUNC handling.
     for trunc in list(tree.find_all(exp.Anonymous)):
         if trunc.name and trunc.name.upper() == "TRUNC":
@@ -477,7 +500,12 @@ def _date_sub_fn_for(node: exp.Expression) -> str:
     """Pick the BigQuery *_SUB function whose first argument type matches
     the inferred type of `node`.
     """
+    if isinstance(node, exp.CurrentDatetime):
+        return "DATETIME_SUB"
     if isinstance(node, exp.CurrentTimestamp):
+        # SYSDATE has been rewritten to CurrentDatetime above; anything
+        # still arriving here as CurrentTimestamp came from an explicit
+        # CURRENT_TIMESTAMP in the source SQL.
         return "TIMESTAMP_SUB"
     if isinstance(node, exp.CurrentDate):
         return "DATE_SUB"

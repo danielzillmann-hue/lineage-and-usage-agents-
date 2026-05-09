@@ -349,13 +349,25 @@ def _process_transform(el: ET.Element, state: _BuilderState) -> None:
                     drop_cols.add(c.strip().lower())
         elif tag == "math":
             op = (child.attrib.get("operation") or "").lower()
-            c1 = child.attrib.get("col1") or ""
-            c2 = child.attrib.get("col2") or ""
+            # The XML format uses `colN` for column references and `valN`
+            # for literal values. Either may be set per operand.
+            lhs = (
+                child.attrib.get("col1")
+                or child.attrib.get("val1")
+                or ""
+            )
+            lhs_is_literal = bool(child.attrib.get("val1") and not child.attrib.get("col1"))
+            rhs = (
+                child.attrib.get("col2")
+                or child.attrib.get("val2")
+                or ""
+            )
+            rhs_is_literal = bool(child.attrib.get("val2") and not child.attrib.get("col2"))
             res = child.attrib.get("result_column") or "calc"
             sym = {"multiply": "*", "add": "+", "subtract": "-", "divide": "/"}.get(op, "+")
             new_cols.append(ColumnDef(
                 name=res,
-                expression=f"{_math_operand(c1)} {sym} {_math_operand(c2)}",
+                expression=f"{_math_operand(lhs, force_literal=lhs_is_literal)} {sym} {_math_operand(rhs, force_literal=rhs_is_literal)}",
             ))
         elif tag == "calculate_category":
             col = child.attrib.get("column") or ""
@@ -436,19 +448,24 @@ def _collect_update_set_columns(steps_el: ET.Element) -> dict[str, list[str]]:
     return out
 
 
-def _math_operand(token: str) -> str:
-    """Render a `<math col1=... col2=...>` operand.
+def _math_operand(token: str, force_literal: bool = False) -> str:
+    """Render a `<math>` operand to its SQL form.
 
-    Numeric literals are passed through verbatim ("100", "-2.5"); everything
-    else is treated as a column name and prefixed with the upstream alias
-    `src.`. Without this, expressions like `<math col2="100">` rendered as
-    `src.100`, which sqlglot's BigQuery emitter strips to `src.` (a syntax
-    error in the generated SQL).
+    The XML format expresses operands two ways:
+    - `colN="MY_COLUMN"` — a column reference, prefixed with `src.`.
+    - `valN="100"` — a literal value, emitted verbatim.
+
+    `force_literal=True` (caller saw a `valN` attribute) bypasses the
+    column-vs-literal heuristic; numeric strings are detected on their
+    own otherwise.
     """
     t = token.strip()
     if not t:
         return "NULL"
-    if _NUMERIC_LITERAL_RE.match(t):
+    if force_literal or _NUMERIC_LITERAL_RE.match(t):
+        # Wrap non-numeric literals (e.g. val2="2024-01-01") in quotes.
+        if not _NUMERIC_LITERAL_RE.match(t) and not (t.startswith("'") and t.endswith("'")):
+            return f"'{t}'"
         return t
     return f"src.{t}"
 
