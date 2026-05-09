@@ -515,8 +515,14 @@ def _infer_bq_type(col: str) -> str:
 
 
 def _stub_table_block(name: str, config: DataformProjectConfig, columns: list[str]) -> str:
-    """Render a `type: "table"` block with an empty SELECT but the
-    inferred column shape so dependents can compile and run end-to-end.
+    """Render a `type: "table"` block that materialises an empty BQ table
+    with the inferred column shape. Dependents compile and run; users
+    swap the body for a real load when source data lands.
+
+    `SELECT … FROM UNNEST(ARRAY<INT64>[])` is the standard BigQuery idiom
+    for "table with this schema and zero rows" — `WHERE FALSE` alone
+    fails BQ's "Query without FROM clause cannot have a WHERE clause"
+    check.
     """
     if not columns:
         # Nothing to infer — emit a single STRING column so the table
@@ -533,7 +539,7 @@ def _stub_table_block(name: str, config: DataformProjectConfig, columns: list[st
         f'  name: "{name}",\n'
         f'  description: "Stub source — schema inferred from downstream usage; populate with real data when available.",\n'
         f"}}\n\n"
-        f"SELECT\n  {casts}\nWHERE FALSE"
+        f"SELECT\n  {casts}\nFROM UNNEST(ARRAY<INT64>[])"
     )
 
 
