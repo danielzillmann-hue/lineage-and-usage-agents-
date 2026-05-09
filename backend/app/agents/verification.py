@@ -58,7 +58,7 @@ class TableComparison:
     name: str
     bq_dataset: str
     classification: str           # oracle_origin | view_origin | csv_stub | bq_derived
-    status: str                   # match | drift | missing_in_bq | missing_in_oracle | skipped | error
+    status: str = ""              # match | drift | missing_in_bq | missing_in_oracle | skipped | error
     oracle_rows: int | None = None
     bq_rows: int | None = None
     columns_compared: list[str] = field(default_factory=list)
