@@ -67,8 +67,12 @@ Aligned to what the agents' generated Dataform project references via
 
 - `accounts`, `account_types`, `account_investments`
 - `members`, `member_addresses`
-- `transactions`, `tax_brackets`
-- `investment_options`, `market_benchmarks`
+- `transactions`
+- `investment_options`
 - `vw_member_risk_profile` (view; replicated as a snapshot table)
+
+`tax_brackets` and `market_benchmarks` are CSV-only inputs (no Oracle
+counterpart) — the Dataform project emits stub source declarations for
+them, so `${ref()}` resolves without an Oracle copy.
 
 Override with `--tables` if the demo bucket adds or renames anything.

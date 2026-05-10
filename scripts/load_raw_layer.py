@@ -47,7 +47,10 @@ from google.cloud.exceptions import NotFound
 log = logging.getLogger("load_raw_layer")
 
 
-# Tables the Insignia demo pipelines reference. Override with --tables.
+# Tables the Insignia demo pipelines reference and that exist in Oracle.
+# `tax_brackets` and `market_benchmarks` are CSV-only inputs — they have
+# no Oracle counterpart, so they're emitted as stub source declarations
+# in the Dataform project and skipped here. Override with --tables.
 DEFAULT_TABLES = [
     "accounts",
     "account_types",
@@ -55,9 +58,7 @@ DEFAULT_TABLES = [
     "members",
     "member_addresses",
     "transactions",
-    "tax_brackets",
     "investment_options",
-    "market_benchmarks",
     "vw_member_risk_profile",  # view — replicated as a snapshot table
 ]
 
