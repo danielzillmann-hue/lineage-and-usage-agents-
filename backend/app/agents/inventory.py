@@ -140,41 +140,56 @@ async def run(req: RunRequest, results, emit: EmitFn) -> None:
             log.warning("output CSV scan failed: %s", e)
 
     # ─── 3. Match audit-log runs against XML-defined pipelines ──────────
+    # The audit log can carry the same logical pipeline under multiple
+    # names (e.g. `01_members_extract` and `members_extract`). We collapse
+    # to a canonical key (lower-cased, numeric prefix stripped) and
+    # aggregate stats so an XML pipeline absorbs every run record that
+    # matches it, no matter which form Oracle recorded.
     runs = oracle_runs
-    matched: set[str] = set()
+    matched_canonicals: set[str] = set()
     if runs:
-        runs_by_canonical: dict[str, ora.PipelineRunStat] = {}
+        runs_by_canonical: dict[str, list[ora.PipelineRunStat]] = {}
         for r in runs:
-            for k in {r.pipeline_name, _strip_numeric_prefix(r.pipeline_name)}:
-                runs_by_canonical.setdefault(k.lower(), r)
+            canonical = _strip_numeric_prefix(r.pipeline_name).lower()
+            runs_by_canonical.setdefault(canonical, []).append(r)
+
         for p in inv.pipelines:
-            for k in {p.name, _strip_numeric_prefix(p.name)}:
-                r = runs_by_canonical.get(k.lower())
-                if r:
-                    p.runs = PipelineRunStats(
-                        runs_total=r.runs_total,
-                        runs_success=r.runs_success,
-                        runs_failed=r.runs_failed,
-                        first_run=r.first_run,
-                        last_run=r.last_run,
-                    )
-                    matched.add(r.pipeline_name)
-                    break
-        # Audit-log entries that don't correspond to any defined pipeline
+            canonical = _strip_numeric_prefix(p.name).lower()
+            rs = runs_by_canonical.get(canonical)
+            if not rs:
+                continue
+            p.runs = PipelineRunStats(
+                runs_total=sum(r.runs_total for r in rs),
+                runs_success=sum(r.runs_success for r in rs),
+                runs_failed=sum(r.runs_failed for r in rs),
+                first_run=min((r.first_run for r in rs if r.first_run), default=None),
+                last_run=max((r.last_run for r in rs if r.last_run), default=None),
+            )
+            matched_canonicals.add(canonical)
+
+        # Audit-log entries that don't correspond to any defined pipeline.
+        # Dedup by canonical key so a run reported under both prefixed and
+        # unprefixed names doesn't appear twice.
+        from app.models.schema import OrphanRun
+        emitted_canonicals: set[str] = set()
         for r in runs:
-            if r.pipeline_name in matched:
+            canonical = _strip_numeric_prefix(r.pipeline_name).lower()
+            if canonical in matched_canonicals:
                 continue
-            stripped = _strip_numeric_prefix(r.pipeline_name)
-            # Don't double-emit a numeric-prefixed run if its bare name was matched
-            if stripped != r.pipeline_name and any(p.name.lower() == stripped.lower() for p in inv.pipelines):
+            if canonical in emitted_canonicals:
                 continue
-            from app.models.schema import OrphanRun
+            emitted_canonicals.add(canonical)
+            # Aggregate any other run records that share this canonical key.
+            same = runs_by_canonical[canonical]
             inv.orphan_runs.append(OrphanRun(
                 pipeline_name=r.pipeline_name,
                 csv_generated=r.csv_generated,
                 runs=PipelineRunStats(
-                    runs_total=r.runs_total, runs_success=r.runs_success, runs_failed=r.runs_failed,
-                    first_run=r.first_run, last_run=r.last_run,
+                    runs_total=sum(s.runs_total for s in same),
+                    runs_success=sum(s.runs_success for s in same),
+                    runs_failed=sum(s.runs_failed for s in same),
+                    first_run=min((s.first_run for s in same if s.first_run), default=None),
+                    last_run=max((s.last_run for s in same if s.last_run), default=None),
                 ),
             ))
 
