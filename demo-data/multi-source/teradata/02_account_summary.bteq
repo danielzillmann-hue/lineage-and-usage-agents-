@@ -1,0 +1,68 @@
+/* ───────────────────────────────────────────────────────────────────────
+   Teradata BTEQ batch: nightly account summary refresh.
+
+   Wraps three SQL operations in BTEQ control flow:
+     1. CTAS a fresh "balances today" snapshot from the daily extract
+     2. CTAS a per-account aggregate
+     3. MERGE the aggregate into the SCD2 dimension
+
+   Style notes:
+     - Dot-commands start in column 1 and are NOT terminated with `;`.
+     - SQL statements ARE terminated with `;` and may span multiple lines.
+     - `MULTISET` is Teradata's "allow duplicates" CREATE TABLE flavour.
+     - `COLLECT STATISTICS` is metadata-only; it doesn't change rows.
+   ─────────────────────────────────────────────────────────────────────── */
+
+.LOGON tdprod/etl_user,***
+.SET SESSIONS 4
+.SET WIDTH 1000
+.SET ERRORLEVEL 3807 SEVERITY 0   /* ignore "table doesn't exist" on DROP */
+
+DROP TABLE WORK.balances_today;
+.IF ERRORCODE <> 0 THEN .QUIT 8;
+
+CREATE MULTISET TABLE WORK.balances_today AS (
+    SELECT
+        b.account_id,
+        b.member_id,
+        b.balance_amt,
+        b.currency_code,
+        b.snapshot_dt
+    FROM   STG.daily_balance_extract b
+    WHERE  b.snapshot_dt = CURRENT_DATE
+) WITH DATA PRIMARY INDEX (account_id);
+
+COLLECT STATISTICS COLUMN (account_id) ON WORK.balances_today;
+
+DROP TABLE WORK.account_summary;
+.IF ERRORCODE <> 0 THEN .QUIT 8;
+
+CREATE MULTISET TABLE WORK.account_summary AS (
+    SELECT
+        bt.member_id,
+        COUNT(*)               AS account_count,
+        SUM(bt.balance_amt)    AS total_balance,
+        MAX(bt.snapshot_dt)    AS as_of_dt
+    FROM WORK.balances_today bt
+    GROUP BY bt.member_id
+) WITH DATA PRIMARY INDEX (member_id);
+
+/* SCD2-style upsert: close out matching open rows, then insert new ones. */
+MERGE INTO DW.dim_member_balance tgt
+USING WORK.account_summary src
+   ON tgt.member_id = src.member_id
+  AND tgt.is_current = 1
+WHEN MATCHED AND tgt.total_balance <> src.total_balance THEN
+    UPDATE SET
+        is_current   = 0,
+        end_dt       = CURRENT_DATE
+WHEN NOT MATCHED THEN
+    INSERT (member_id, account_count, total_balance, as_of_dt, is_current, end_dt)
+    VALUES (src.member_id, src.account_count, src.total_balance,
+            src.as_of_dt, 1, DATE '9999-12-31');
+
+COLLECT STATISTICS COLUMN (member_id) ON DW.dim_member_balance;
+
+.IF ERRORCODE <> 0 THEN .QUIT 16;
+.LOGOFF
+.QUIT

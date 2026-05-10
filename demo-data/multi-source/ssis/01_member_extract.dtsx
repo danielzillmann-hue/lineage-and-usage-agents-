@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Demo-grade SSIS package: extract members modified in the last day, look up
+  fund names, split into NEW vs EXISTING flows, and write to a staging table.
+
+  Real .dtsx files are produced by Visual Studio / SSDT and are far chunkier
+  (every component carries auto-generated GUIDs, layout metadata, and a
+  CDATA-wrapped binary blob for the visual designer). This sample keeps the
+  semantically-meaningful XML and drops the rest.
+-->
+<DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
+                DTS:ObjectName="Pkg_MemberExtract"
+                DTS:DTSID="{8F6A2B41-9B2C-4E6A-A1F1-3C0F1D7B5E11}"
+                DTS:ExecutableType="Microsoft.Package">
+
+  <DTS:ConnectionManagers>
+    <DTS:ConnectionManager DTS:ObjectName="SRC_OLTP"
+                           DTS:CreationName="OLEDB"
+                           DTS:ConnectionString="Data Source=oltp01;Initial Catalog=MemberDB;Provider=SQLNCLI11.1;Integrated Security=SSPI;" />
+    <DTS:ConnectionManager DTS:ObjectName="STG_DW"
+                           DTS:CreationName="OLEDB"
+                           DTS:ConnectionString="Data Source=dw01;Initial Catalog=Staging;Provider=SQLNCLI11.1;Integrated Security=SSPI;" />
+  </DTS:ConnectionManagers>
+
+  <DTS:Variables>
+    <DTS:Variable DTS:ObjectName="ExtractDate" DTS:DataType="7">
+      <DTS:VariableValue>2026-05-09</DTS:VariableValue>
+    </DTS:Variable>
+  </DTS:Variables>
+
+  <!-- Pre-flight: clear yesterday's staging rows. -->
+  <DTS:Executable DTS:ObjectName="SQL_TruncateStaging"
+                  DTS:ExecutableType="Microsoft.ExecuteSQLTask">
+    <DTS:Property DTS:Name="Connection">STG_DW</DTS:Property>
+    <DTS:Property DTS:Name="SqlStatementSource">
+      TRUNCATE TABLE Staging.dbo.StgMember;
+    </DTS:Property>
+  </DTS:Executable>
+
+  <!-- The Data Flow Task is where component-to-component lineage lives. -->
+  <DTS:Executable DTS:ObjectName="DFT_LoadMembers"
+                  DTS:ExecutableType="SSIS.Pipeline.3">
+    <DTS:ObjectData>
+      <pipeline>
+
+        <component refId="DFT_LoadMembers\OLEDB_SRC_Members"
+                   componentClassID="Microsoft.OLEDBSource"
+                   name="OLEDB_SRC_Members">
+          <properties>
+            <property name="OpenRowset">[dbo].[Members]</property>
+            <property name="AccessMode">2</property>
+            <property name="SqlCommand">
+              SELECT MemberID, FundCode, FirstName, LastName, DOB, JoinDate, ModifiedAt
+              FROM dbo.Members
+              WHERE ModifiedAt &gt;= DATEADD(day, -1, ?)
+            </property>
+            <property name="ConnectionManager">SRC_OLTP</property>
+          </properties>
+          <outputs>
+            <output name="OLE DB Source Output">
+              <columns>
+                <column name="MemberID"   dataType="i4" />
+                <column name="FundCode"   dataType="wstr" length="10" />
+                <column name="FirstName"  dataType="wstr" length="50" />
+                <column name="LastName"   dataType="wstr" length="50" />
+                <column name="DOB"        dataType="dbDate" />
+                <column name="JoinDate"   dataType="dbDate" />
+                <column name="ModifiedAt" dataType="dbTimeStamp" />
+              </columns>
+            </output>
+          </outputs>
+        </component>
+
+        <!-- Lookup against a small fund reference table; full-cache. -->
+        <component refId="DFT_LoadMembers\LKP_Fund"
+                   componentClassID="Microsoft.Lookup"
+                   name="LKP_Fund">
+          <properties>
+            <property name="ReferenceTableName">[dbo].[Fund]</property>
+            <property name="JoinKeys">FundCode</property>
+            <property name="ConnectionManager">SRC_OLTP</property>
+          </properties>
+          <outputs>
+            <output name="Lookup Match Output">
+              <columns>
+                <column name="FundName" dataType="wstr" length="80" lineageId="LKP_Fund.FundName" />
+              </columns>
+            </output>
+          </outputs>
+        </component>
+
+        <!-- Derived Column: classify member_type from join date age. -->
+        <component refId="DFT_LoadMembers\DER_MemberType"
+                   componentClassID="Microsoft.DerivedColumn"
+                   name="DER_MemberType">
+          <outputs>
+            <output name="Derived Column Output">
+              <columns>
+                <column name="MemberType"
+                        dataType="wstr"
+                        length="10"
+                        expression="DATEDIFF(&quot;yyyy&quot;, JoinDate, GETDATE()) &gt;= 5 ? &quot;LONG&quot; : &quot;NEW&quot;" />
+                <column name="FullName"
+                        dataType="wstr"
+                        length="120"
+                        expression="FirstName + &quot; &quot; + LastName" />
+              </columns>
+            </output>
+          </outputs>
+        </component>
+
+        <!-- Conditional Split: route NEW vs EXISTING members. -->
+        <component refId="DFT_LoadMembers\CSPL_Route"
+                   componentClassID="Microsoft.ConditionalSplit"
+                   name="CSPL_Route">
+          <outputs>
+            <output name="NewMembers">
+              <properties>
+                <property name="EvaluationExpression">MemberType == "NEW"</property>
+              </properties>
+            </output>
+            <output name="ExistingMembers" isDefault="true">
+              <properties>
+                <property name="EvaluationExpression">MemberType == "LONG"</property>
+              </properties>
+            </output>
+          </outputs>
+        </component>
+
+        <component refId="DFT_LoadMembers\OLEDB_DST_StgMember"
+                   componentClassID="Microsoft.OLEDBDestination"
+                   name="OLEDB_DST_StgMember">
+          <properties>
+            <property name="OpenRowset">[dbo].[StgMember]</property>
+            <property name="ConnectionManager">STG_DW</property>
+          </properties>
+        </component>
+
+      </pipeline>
+    </DTS:ObjectData>
+  </DTS:Executable>
+</DTS:Executable>
