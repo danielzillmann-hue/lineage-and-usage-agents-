@@ -20,7 +20,7 @@ docs/       Architecture notes, agent prompts, schema design
 
 ## GCP
 
-- Project: `dan-sandpit`
+- Project: `transformation-agent-demo`
 - Account: `daniel.zillmann@intelia.com.au`
 - Region: `australia-southeast1`
 

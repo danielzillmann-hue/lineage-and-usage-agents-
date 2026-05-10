@@ -19,15 +19,21 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from app.config import get_settings
+
 if TYPE_CHECKING:
     from app.transformer.runner import GeneratedFile
 
 
 @dataclass
 class DataformProjectConfig:
-    """Target environment for the assembled Dataform repo."""
-    gcp_project: str = "dan-sandpit"
-    location: str = "australia-southeast1"
+    """Target environment for the assembled Dataform repo.
+
+    Defaults pull from app settings so this stays in sync with the
+    deployment environment instead of needing edits in two places.
+    """
+    gcp_project: str = field(default_factory=lambda: get_settings().gcp_project)
+    location: str = field(default_factory=lambda: get_settings().gcp_region)
     default_dataset: str = "migration_demo"
     assertion_dataset: str = "migration_demo_assertions"
     source_dataset: str = "migration_raw"

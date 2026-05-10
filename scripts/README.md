@@ -21,7 +21,7 @@ gcloud auth application-default login
 ### Run
 
 The defaults match the demo — Direnc's Oracle host (`35.201.6.195`),
-`dan-sandpit.migration_raw` target, every table the demo pipelines read
+`transformation-agent-demo.migration_raw` target, every table the demo pipelines read
 from. So you can usually just:
 
 ```bash
@@ -43,7 +43,7 @@ python scripts/load_raw_layer.py --if-exists append
 # Override Oracle / BQ targets
 python scripts/load_raw_layer.py \
   --oracle-host 35.201.6.195 \
-  --bq-project dan-sandpit --bq-dataset migration_raw
+  --bq-project transformation-agent-demo --bq-dataset migration_raw
 ```
 
 ### What it does

@@ -4,7 +4,7 @@
 #   gcloud builds submit \
 #     --config infra/cloudbuild.yaml \
 #     --account=daniel.zillmann@intelia.com.au \
-#     --project=dan-sandpit \
+#     --project=transformation-agent-demo \
 #     --region=australia-southeast1
 #
 # Substitutions can be overridden with --substitutions=_FOO=bar.
@@ -61,7 +61,7 @@ steps:
           --cpu=2 --memory=2Gi \
           --concurrency=20 \
           --timeout=900 \
-          --set-env-vars="APP_GCP_PROJECT=$PROJECT_ID,APP_GCP_REGION=${_REGION},APP_VERTEX_LOCATION=${_REGION},APP_RESULTS_BUCKET=dan-sandpit-lineage-results,APP_CORS_ORIGINS=[\"*\"]"
+          --set-env-vars="APP_GCP_PROJECT=$PROJECT_ID,APP_GCP_REGION=${_REGION},APP_VERTEX_LOCATION=${_REGION},APP_RESULTS_BUCKET=$PROJECT_ID-lineage-results,APP_DEMO_ETL_BUCKET=$PROJECT_ID-lineage-demo,APP_CORS_ORIGINS=[\"*\"]"
         URL=$$(gcloud run services describe ${_BACKEND_SERVICE} --region=${_REGION} --format='value(status.url)')
         echo "$$URL" > /workspace/backend_url.txt
         echo "Backend deployed at: $$URL"

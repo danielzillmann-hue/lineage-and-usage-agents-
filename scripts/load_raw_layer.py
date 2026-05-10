@@ -3,8 +3,8 @@
 
 One-shot script for the Tuesday end-to-end demo. The Dataform pipelines
 the agents generate read from `<project>.<dataset>` (default
-`dan-sandpit.migration_raw`); this populates that dataset with sample
-data so `dataform run` actually produces tables.
+`transformation-agent-demo.migration_raw`); this populates that dataset
+with sample data so `dataform run` actually produces tables.
 
 Usage:
     python scripts/load_raw_layer.py
@@ -13,7 +13,7 @@ Usage:
     python scripts/load_raw_layer.py \\
         --oracle-host 35.201.6.195 \\
         --oracle-user superuser --oracle-pass superpassword \\
-        --bq-project dan-sandpit --bq-dataset migration_raw \\
+        --bq-project transformation-agent-demo --bq-dataset migration_raw \\
         --limit 100000
 
 Defaults are aligned to Direnc's demo Oracle box. Override anything via
@@ -373,7 +373,7 @@ def parse_args() -> Config:
     p.add_argument("--oracle-service", default=os.getenv("ORACLE_SERVICE", "XEPDB1"))
     p.add_argument("--oracle-user", default=os.getenv("ORACLE_USER", "superuser"))
     p.add_argument("--oracle-pass", default=os.getenv("ORACLE_PASS", "superpassword"))
-    p.add_argument("--bq-project", default=os.getenv("BQ_PROJECT", "dan-sandpit"))
+    p.add_argument("--bq-project", default=os.getenv("BQ_PROJECT", "transformation-agent-demo"))
     p.add_argument("--bq-dataset", default=os.getenv("BQ_DATASET", "migration_raw"))
     p.add_argument("--location", default=os.getenv("BQ_LOCATION", "australia-southeast1"))
     p.add_argument(

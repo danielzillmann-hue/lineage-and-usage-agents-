@@ -7,11 +7,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="APP_", extra="ignore")
 
-    gcp_project: str = Field(default="dan-sandpit")
+    gcp_project: str = Field(default="transformation-agent-demo")
     gcp_region: str = Field(default="australia-southeast1")
     firestore_database: str = Field(default="(default)")
     firestore_collection_runs: str = Field(default="lineage_runs")
-    results_bucket: str = Field(default="dan-sandpit-lineage-results")
+    results_bucket: str = Field(default="transformation-agent-demo-lineage-results")
 
     # Vertex AI Gemini — uses ADC, no API key needed.
     # 2.5 Flash is in australia-southeast1; 2.5 Pro currently isn't, so summary uses us-central1.
@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     demo_db_service: str = Field(default="XEPDB1")
     demo_db_user: str = Field(default="superuser")
     demo_db_password: str = Field(default="superpassword")
-    demo_etl_bucket: str = Field(default="dan-sandpit-lineage-demo")
+    demo_etl_bucket: str = Field(default="transformation-agent-demo-lineage-demo")
     demo_etl_prefix: str = Field(default="extracts/super-fund/etl/")
     demo_outputs_prefix: str = Field(default="extracts/super-fund/outputs/")
     demo_documents_prefix: str = Field(default="documents/")
