@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from google.genai import types
 
 from app.agents.base import gemini
+from app.config import get_settings
 
 log = logging.getLogger(__name__)
 
@@ -61,7 +62,10 @@ async def convert_procedure(
     timeout_seconds: int = 60,
 ) -> ConvertedProcedure:
     """Translate one procedure. Returns the wrapped SQLX text."""
-    client = gemini()
+    # Gemini 2.5 Pro isn't available in australia-southeast1 — route to
+    # the summary location (us-central1 by default) so the call resolves.
+    settings = get_settings()
+    client = gemini(location=settings.summary_location)
     cfg = types.GenerateContentConfig(
         system_instruction=_PROMPT,
         max_output_tokens=8192,
