@@ -488,8 +488,7 @@ function ParityPreview({ inventory }: { inventory: Inventory }) {
       </CardHeader>
       <CardContent className="p-0">
         <div className="px-5 py-3 text-[12px]" style={{ color: "var(--ink-3)" }}>
-          {targets.length} pipelines · ~{(totalBytes / 1e9).toFixed(1)} GB across{" "}
-          {totalRows ? `~${(totalRows / 1e6).toFixed(1)}M rows` : "unknown row count"}
+          {targets.length} pipelines · {totalRows ? `~${(totalRows / 1e6).toFixed(1)}M rows` : "unknown row count"}
         </div>
         <table className="w-full text-[12.5px]">
           <thead>
@@ -497,7 +496,6 @@ function ParityPreview({ inventory }: { inventory: Inventory }) {
               <th className="text-left px-5 py-2" style={hdrStyle}>Pipeline</th>
               <th className="text-left px-3 py-2" style={hdrStyle}>Sources</th>
               <th className="text-right px-3 py-2" style={hdrStyle}>Source rows</th>
-              <th className="text-right px-3 py-2" style={hdrStyle}>Source bytes</th>
               <th className="text-left px-5 py-2" style={hdrStyle}>Status</th>
             </tr>
           </thead>
@@ -511,9 +509,6 @@ function ParityPreview({ inventory }: { inventory: Inventory }) {
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums" style={{ color: "var(--ink-2)" }}>
                   {t.rows != null ? t.rows.toLocaleString() : "—"}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums" style={{ color: "var(--ink-2)" }}>
-                  {t.bytes ? `${(t.bytes / 1e9).toFixed(2)} GB` : "—"}
                 </td>
                 <td className="px-5 py-2">
                   <span

@@ -424,9 +424,13 @@ export function SetupForm() {
                           display: "flex", alignItems: "center", justifyContent: "space-between",
                           gap: 8,
                         }}>
+                          {/* When active the card bg is a hard-coded light pastel
+                              (a.bg), so the name + description need a hard-coded
+                              dark colour to stay readable in dark mode where
+                              var(--ink) flips to near-white. */}
                           <span style={{
                             fontSize: 13.5, fontWeight: 500,
-                            color: on ? "var(--ink)" : "var(--ink-2)",
+                            color: on ? "#0F1F2C" : "var(--ink-2)",
                           }}>{a.name}</span>
                           <span
                             className="mono"
@@ -442,7 +446,8 @@ export function SetupForm() {
                           </span>
                         </div>
                         <div style={{
-                          fontSize: 11.5, color: "var(--ink-3)",
+                          fontSize: 11.5,
+                          color: on ? "#3B4A57" : "var(--ink-3)",
                           lineHeight: 1.45, marginTop: 3,
                         }}>
                           {a.desc}

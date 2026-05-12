@@ -18,9 +18,6 @@ export function ExecutiveSummaryView({ results }: { results: RunResults }) {
   const hotCount = usg?.hot_tables.length ?? 0;
   const orphanCount = usg?.write_only_orphans.length ?? 0;
   const deadCount = usg?.dead_objects.length ?? 0;
-  const reachable = usg?.reporting_reachable_sources.length ?? 0;
-  const unreachable = usg?.reporting_unreachable_sources.length ?? 0;
-  const reachPct = reachable + unreachable === 0 ? 0 : (reachable / (reachable + unreachable)) * 100;
 
   const critFindings = sum?.findings.filter((f) => f.severity === "critical").length ?? 0;
   const warnFindings = sum?.findings.filter((f) => f.severity === "warn").length ?? 0;
@@ -53,10 +50,9 @@ export function ExecutiveSummaryView({ results }: { results: RunResults }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <MetricCard label="Tables &amp; views" value={formatNumber(tableCount)} sub={`${formatNumber(procCount)} procedures`} icon={Database} tint="from-[#285294] to-[#7ebcf9]" />
         <MetricCard label="Lineage edges" value={formatNumber(edgeCount)} sub="column-level mappings" icon={GitBranch} tint="from-[#7ebcf9] to-[#00b4f0]" />
-        <MetricCard label="Reporting-reachable" value={`${reachPct.toFixed(0)}%`} sub={`${reachable} of ${reachable + unreachable} raw sources`} icon={Activity} tint="from-[#00b4f0] to-[#18c29c]" />
         <MetricCard label="Findings" value={formatNumber((sum?.findings.length) ?? 0)} sub={`${critFindings} critical · ${warnFindings} warn`} icon={AlertTriangle} tint="from-[#ff6b47] to-[#f6b400]" />
       </div>
 
