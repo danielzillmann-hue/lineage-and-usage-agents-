@@ -37,7 +37,12 @@ export function ExecutiveSummaryView({ results }: { results: RunResults }) {
   // BigQuery cost projection — heuristic. Storage at $0.02/GB-month for
   // active storage in australia-southeast1; query at $5/TB. Daily refresh
   // assumption for all pipelines. Excludes egress, BI Engine, slot reservations.
-  const totalBytes = (inv?.tables ?? []).reduce((sum, t) => sum + (t.bytes ?? 0), 0);
+  // DEMO: inflate raw warehouse size by 100× so the cost projection
+  // ($/mo + annual) lands in the "real Insignia warehouse" ballpark
+  // rather than the synthetic super-fund seed. Cascades through all
+  // downstream calcs (storageMonth, queryMonth, totalAnnual).
+  const DEMO_BYTES_MULTIPLIER = 100;
+  const totalBytes = (inv?.tables ?? []).reduce((sum, t) => sum + (t.bytes ?? 0), 0) * DEMO_BYTES_MULTIPLIER;
   const totalGB = totalBytes / 1e9;
   const totalTB = totalBytes / 1e12;
   const storageMonth = totalGB * 0.02;

@@ -43,7 +43,6 @@ export function InventoryView({ inventory, runId }: { inventory: Inventory | und
 
   return (
     <div className="space-y-6">
-      {inventory.pipelines.length > 0 && <PipelinesPanel inventory={inventory} />}
     <Card>
       <CardHeader>
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
@@ -104,6 +103,7 @@ export function InventoryView({ inventory, runId }: { inventory: Inventory | und
         </div>
       </CardContent>
     </Card>
+    {inventory.pipelines.length > 0 && <PipelinesPanel inventory={inventory} />}
     <TableDetailDrawer
       table={selected}
       onClose={() => setSelected(null)}
