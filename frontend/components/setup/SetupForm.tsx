@@ -200,7 +200,7 @@ export function SetupForm() {
     <div className="mx-auto" style={{ maxWidth: 1180, padding: "56px 32px 80px" }}>
       {/* Eyebrow */}
       <div className="eyebrow flex items-center gap-2">
-        <span className="dot ok" /> Multi-agent · Oracle warehouse
+        <span className="dot ok" /> Multi-agent
       </div>
 
       {/* Display H1 */}

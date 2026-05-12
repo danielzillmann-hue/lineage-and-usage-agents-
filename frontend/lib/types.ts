@@ -135,6 +135,7 @@ export interface Procedure {
   name: string;
   kind: string;
   source: string;
+  last_compiled?: string | null;
 }
 
 export interface InventoryFlag {

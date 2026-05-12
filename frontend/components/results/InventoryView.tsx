@@ -104,6 +104,7 @@ export function InventoryView({ inventory, runId }: { inventory: Inventory | und
       </CardContent>
     </Card>
     {inventory.pipelines.length > 0 && <PipelinesPanel inventory={inventory} />}
+    {inventory.procedures.length > 0 && <ProceduresPanel inventory={inventory} />}
     <TableDetailDrawer
       table={selected}
       onClose={() => setSelected(null)}
@@ -186,6 +187,64 @@ function PipelinesPanel({ inventory }: { inventory: NonNullable<Parameters<typeo
                   </td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ProceduresPanel({ inventory }: { inventory: NonNullable<Parameters<typeof InventoryView>[0]["inventory"]> }) {
+  const procs = inventory.procedures;
+  // Bucket by kind so the audience sees the breakdown at a glance.
+  const counts = procs.reduce<Record<string, number>>((acc, p) => {
+    const k = p.kind || "OTHER";
+    acc[k] = (acc[k] ?? 0) + 1;
+    return acc;
+  }, {});
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Stored procedures</CardTitle>
+        <div className="mt-1 text-[12px] text-[var(--color-fg-muted)]">
+          {formatNumber(procs.length)} discovered ·{" "}
+          {Object.entries(counts).map(([k, n], i) => (
+            <span key={k}>
+              {i > 0 && " · "}
+              <span className="font-mono text-[var(--ink-2)]">{k}</span> {n}
+            </span>
+          ))}
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12.5px]">
+            <thead>
+              <tr className="border-y border-[var(--color-border-soft)] text-[10.5px] uppercase tracking-wider text-[var(--color-fg-subtle)]">
+                <th className="text-left px-5 py-2 font-medium">Procedure</th>
+                <th className="text-left px-3 py-2 font-medium">Kind</th>
+                <th className="text-right px-3 py-2 font-medium">Source lines</th>
+                <th className="text-right px-5 py-2 font-medium">Last compiled</th>
+              </tr>
+            </thead>
+            <tbody>
+              {procs.map((p) => {
+                const lineCount = (p.source ?? "").split("\n").length;
+                return (
+                  <tr key={`${p.schema_name}.${p.name}`} className="border-b border-[var(--color-border-soft)] hover:bg-white/[0.02]">
+                    <td className="px-5 py-2.5 font-mono">
+                      <span className="text-[var(--color-fg-subtle)]">{p.schema_name}.</span>
+                      <span className="text-[var(--ink)]">{p.name}</span>
+                    </td>
+                    <td className="px-3 py-2.5"><Badge variant="neutral">{p.kind}</Badge></td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-[var(--color-fg-muted)]">{lineCount}</td>
+                    <td className="px-5 py-2.5 text-right text-[11px] text-[var(--color-fg-muted)]">
+                      {p.last_compiled ? p.last_compiled.replace("T", " ").slice(0, 16) : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
