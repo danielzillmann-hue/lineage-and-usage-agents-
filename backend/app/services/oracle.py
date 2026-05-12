@@ -79,10 +79,20 @@ class PipelineRunStat:
 
 
 @dataclass
+class OracleProcedure:
+    schema: str
+    name: str
+    kind: str                 # PROCEDURE | FUNCTION | PACKAGE | PACKAGE_BODY | TRIGGER
+    source: str
+    last_compiled: str | None
+
+
+@dataclass
 class OracleSnapshot:
     schema: str
     tables: list[OracleTable]
     pipeline_runs: list[PipelineRunStat]
+    procedures: list[OracleProcedure]
     fetched_at: str
 
 
@@ -220,10 +230,54 @@ def snapshot(conn: OracleConn) -> OracleSnapshot:
         except oracledb.DatabaseError as e:
             log.info("etl_execution_logs unavailable: %s", e)
 
+        # Stored procedures, functions, packages, package bodies, triggers.
+        # We join user_objects (gives name + type + last_ddl_time) to
+        # user_source (gives the body text, one row per line). Body text
+        # is assembled in line order. Limited to objects in the same
+        # schema as the connection.
+        procedures: list[OracleProcedure] = []
+        try:
+            cur.execute(
+                """
+                SELECT object_name, object_type, last_ddl_time
+                FROM   user_objects
+                WHERE  object_type IN (
+                         'PROCEDURE','FUNCTION','PACKAGE','PACKAGE BODY','TRIGGER'
+                       )
+                ORDER  BY object_type, object_name
+                """,
+            )
+            obj_rows = cur.fetchall()
+            for obj_name, obj_type, last_ddl in obj_rows:
+                # Pull source text for this object, line by line.
+                cur.execute(
+                    """
+                    SELECT text
+                    FROM   user_source
+                    WHERE  name = :n AND type = :t
+                    ORDER  BY line
+                    """,
+                    n=obj_name, t=obj_type,
+                )
+                body = "".join(r[0] or "" for r in cur.fetchall()).rstrip()
+                if not body:
+                    continue
+                kind = (obj_type or "").replace(" ", "_").upper()
+                procedures.append(OracleProcedure(
+                    schema=schema,
+                    name=obj_name,
+                    kind=kind,
+                    source=body,
+                    last_compiled=str(last_ddl) if last_ddl else None,
+                ))
+        except oracledb.DatabaseError as e:
+            log.info("user_procedures introspection failed: %s", e)
+
         return OracleSnapshot(
             schema=schema,
             tables=tables,
             pipeline_runs=pipeline_runs,
+            procedures=procedures,
             fetched_at=datetime.utcnow().isoformat(),
         )
 

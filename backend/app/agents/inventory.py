@@ -52,7 +52,8 @@ async def run(req: RunRequest, results, emit: EmitFn) -> None:
             snap = ora.snapshot(conn)
             await log_event(
                 emit, AgentName.INVENTORY,
-                f"Live introspection: schema {snap.schema} · {len(snap.tables)} tables · {len(snap.pipeline_runs)} pipelines in audit log",
+                f"Live introspection: schema {snap.schema} · {len(snap.tables)} tables · "
+                f"{len(snap.procedures)} procedures · {len(snap.pipeline_runs)} pipelines in audit log",
             )
             for ot in snap.tables:
                 cols = [
@@ -70,6 +71,11 @@ async def run(req: RunRequest, results, emit: EmitFn) -> None:
                     source_text=ot.source_text,
                 )
                 inv.tables.append(t)
+            for p in snap.procedures:
+                inv.procedures.append(Procedure(
+                    schema_name=p.schema, name=p.name, kind=p.kind,
+                    source=p.source, last_compiled=p.last_compiled,
+                ))
             oracle_runs = snap.pipeline_runs
         except Exception as e:  # noqa: BLE001
             log.exception("oracle introspection failed")
