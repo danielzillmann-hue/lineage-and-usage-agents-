@@ -483,7 +483,10 @@ function TableRow({ table }: { table: TableComparison }) {
   const meta = STATUS_META[displayStatusOf(table)];
   const Icon = meta.Icon;
   const color = TONE_COLOR[meta.tone];
-  const hasDetails = table.column_diffs.length > 0 || !!table.error;
+  const hasSchema =
+    (table.oracle_columns && table.oracle_columns.length > 0) ||
+    (table.bq_columns && table.bq_columns.length > 0);
+  const hasDetails = table.column_diffs.length > 0 || !!table.error || hasSchema;
 
   return (
     <div
@@ -560,6 +563,14 @@ function TableRow({ table }: { table: TableComparison }) {
               {table.error}
             </div>
           )}
+          {hasSchema && (
+            <SchemaDdl
+              tableName={table.name}
+              bqDataset={table.bq_dataset}
+              oracleCols={table.oracle_columns ?? []}
+              bqCols={table.bq_columns ?? []}
+            />
+          )}
           {table.column_diffs.length > 0 && (
             <ColumnDiffs diffs={table.column_diffs} />
           )}
@@ -567,6 +578,182 @@ function TableRow({ table }: { table: TableComparison }) {
       )}
     </div>
   );
+}
+
+function SchemaDdl({
+  tableName, bqDataset, oracleCols, bqCols,
+}: {
+  tableName: string;
+  bqDataset: string;
+  oracleCols: { name: string; data_type: string; nullable: boolean }[];
+  bqCols: { name: string; type: string; mode?: string }[];
+}) {
+  // Index by uppercase name for the side-by-side diff. Each row pairs
+  // the Oracle column with the BQ column of the same name (case-insensitive).
+  const byName = new Map<string, { oracle?: typeof oracleCols[number]; bq?: typeof bqCols[number] }>();
+  for (const c of oracleCols) {
+    byName.set(c.name.toUpperCase(), { ...(byName.get(c.name.toUpperCase()) ?? {}), oracle: c });
+  }
+  for (const c of bqCols) {
+    byName.set(c.name.toUpperCase(), { ...(byName.get(c.name.toUpperCase()) ?? {}), bq: c });
+  }
+  // Stable order: Oracle order first, then any BQ-only columns appended.
+  const ordered: { key: string; oracle?: typeof oracleCols[number]; bq?: typeof bqCols[number] }[] = [];
+  const seen = new Set<string>();
+  for (const c of oracleCols) {
+    const k = c.name.toUpperCase();
+    ordered.push({ key: k, ...byName.get(k) });
+    seen.add(k);
+  }
+  for (const c of bqCols) {
+    const k = c.name.toUpperCase();
+    if (!seen.has(k)) ordered.push({ key: k, ...byName.get(k) });
+  }
+
+  if (ordered.length === 0) return null;
+
+  const oracleDdl = renderOracleDdl(tableName, oracleCols);
+  const bqDdl = renderBqDdl(`${bqDataset}.${tableName}`, bqCols);
+
+  return (
+    <div className="mb-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="eyebrow">Schema diff</div>
+        <div className="text-[11px]" style={{ color: "var(--ink-3)" }}>
+          {oracleCols.length} Oracle · {bqCols.length} BigQuery · {ordered.length} unique
+        </div>
+      </div>
+
+      {/* Per-column side-by-side */}
+      <div style={{ overflowX: "auto", marginBottom: 12 }}>
+        <table className="w-full text-[12px]" style={{ borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ color: "var(--ink-3)", textAlign: "left" }}>
+              <th style={th()}>Column</th>
+              <th style={th()}>Oracle type</th>
+              <th style={th()}>BigQuery type</th>
+              <th style={th()}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {ordered.map(({ key, oracle, bq }) => {
+              const oracleOnly = oracle && !bq;
+              const bqOnly = !oracle && bq;
+              const both = oracle && bq;
+              return (
+                <tr key={key} style={{ borderTop: "1px solid var(--line)" }}>
+                  <td style={td()}>
+                    <span className="mono">{(oracle?.name ?? bq?.name ?? key)}</span>
+                  </td>
+                  <td style={td()}>
+                    {oracle
+                      ? <span className="mono" style={{ color: "var(--ink-2)" }}>
+                          {oracle.data_type}
+                          {!oracle.nullable && <span style={{ color: "var(--ink-3)" }}> NOT NULL</span>}
+                        </span>
+                      : <span style={{ color: "var(--ink-4)" }}>—</span>}
+                  </td>
+                  <td style={td()}>
+                    {bq
+                      ? <span className="mono" style={{ color: "var(--ink-2)" }}>
+                          {bq.type}
+                          {bq.mode === "REQUIRED" && <span style={{ color: "var(--ink-3)" }}> NOT NULL</span>}
+                        </span>
+                      : <span style={{ color: "var(--ink-4)" }}>—</span>}
+                  </td>
+                  <td style={td()}>
+                    {oracleOnly && <Badge variant="warn">Oracle only</Badge>}
+                    {bqOnly && <Badge variant="info">BQ only</Badge>}
+                    {both && <Badge variant="ok">both</Badge>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Full DDL side-by-side */}
+      <div className="grid grid-cols-2 gap-3">
+        <DdlPane label="Oracle" subtitle={tableName} ddl={oracleDdl} />
+        <DdlPane label="BigQuery" subtitle={`${bqDataset}.${tableName}`} ddl={bqDdl} />
+      </div>
+    </div>
+  );
+}
+
+function DdlPane({
+  label, subtitle, ddl,
+}: { label: string; subtitle: string; ddl: string }) {
+  return (
+    <div
+      style={{
+        border: "1px solid var(--line)",
+        borderRadius: "var(--r-md)",
+        background: "var(--bg-elev)",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          padding: "8px 12px",
+          borderBottom: "1px solid var(--line)",
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+          gap: 8,
+        }}
+      >
+        <span className="eyebrow">{label}</span>
+        <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          {subtitle}
+        </span>
+      </div>
+      <pre
+        className="mono"
+        style={{
+          padding: "10px 12px",
+          fontSize: 11.5,
+          lineHeight: 1.5,
+          color: "var(--ink-2)",
+          background: "var(--bg)",
+          margin: 0,
+          overflow: "auto",
+          maxHeight: 320,
+        }}
+      >
+        {ddl}
+      </pre>
+    </div>
+  );
+}
+
+function renderOracleDdl(
+  name: string,
+  cols: { name: string; data_type: string; nullable: boolean }[],
+): string {
+  if (cols.length === 0) return "-- no Oracle counterpart";
+  const width = Math.max(...cols.map((c) => c.name.length), 1);
+  const lines = cols.map((c, i) => {
+    const padded = c.name.padEnd(width);
+    const nn = c.nullable ? "" : " NOT NULL";
+    return `  ${padded}  ${c.data_type}${nn}${i < cols.length - 1 ? "," : ""}`;
+  });
+  return `CREATE TABLE ${name} (\n${lines.join("\n")}\n);`;
+}
+
+function renderBqDdl(
+  fqn: string,
+  cols: { name: string; type: string; mode?: string }[],
+): string {
+  if (cols.length === 0) return "-- no BigQuery table";
+  const width = Math.max(...cols.map((c) => c.name.length), 1);
+  const lines = cols.map((c, i) => {
+    const padded = c.name.padEnd(width);
+    const nn = c.mode === "REQUIRED" ? " NOT NULL" : "";
+    return `  ${padded}  ${c.type}${nn}${i < cols.length - 1 ? "," : ""}`;
+  });
+  return `CREATE TABLE \`${fqn}\` (\n${lines.join("\n")}\n);`;
 }
 
 function ColumnDiffs({ diffs }: { diffs: TableComparison["column_diffs"] }) {

@@ -208,6 +208,18 @@ export type ColumnDiff = {
   bq: ColumnAggregate;
 };
 
+export type OracleColumn = {
+  name: string;
+  data_type: string;
+  nullable: boolean;
+};
+
+export type BqColumn = {
+  name: string;
+  type: string;
+  mode?: string;
+};
+
 export type TableComparison = {
   name: string;
   bq_dataset: string;
@@ -219,6 +231,8 @@ export type TableComparison = {
   column_diffs: ColumnDiff[];
   notes: string;
   error?: string;
+  oracle_columns?: OracleColumn[];
+  bq_columns?: BqColumn[];
 };
 
 export type VerificationReport = {

@@ -65,6 +65,11 @@ class TableComparison:
     column_diffs: list[dict] = field(default_factory=list)
     notes: str = ""
     error: str = ""
+    # Full schema on each side, for side-by-side DDL rendering in the
+    # frontend. Populated for raw-layer tables (oracle_origin /
+    # view_origin); empty for CSV stubs and BQ-derived outputs.
+    oracle_columns: list[dict] = field(default_factory=list)  # [{name, data_type, nullable}]
+    bq_columns: list[dict] = field(default_factory=list)      # [{name, type, mode}]
 
 
 @dataclass
@@ -278,6 +283,15 @@ def _compare_one(
 
     cmp.bq_rows = bq_count
     cmp.oracle_rows = oracle_count
+    # Persist full BQ schema so the frontend can render the DDL side-by-side.
+    cmp.bq_columns = [
+        {"name": c["name"], "type": c.get("type", ""), "mode": c.get("mode", "")}
+        for c in bq_columns
+    ]
+    # Oracle-side schema (full, with data types + nullable) — only for
+    # raw-layer tables that have an Oracle counterpart.
+    if cls in ("oracle_origin", "view_origin"):
+        cmp.oracle_columns = _oracle_full_columns(oracle_conn, name)
 
     # Resolve "missing on either side" before content-level checks.
     if oracle_count is None and bq_count is None:
@@ -503,6 +517,58 @@ def _oracle_table_columns(oracle_conn, table: str) -> set[str]:
         return {r[0] for r in cur.fetchall()}
     except Exception:
         return set()
+
+
+def _oracle_full_columns(oracle_conn, table: str) -> list[dict]:
+    """Full schema (name, data type, nullable) for a single Oracle table,
+    ordered by column position. Returns [] if the table doesn't exist.
+
+    Used by the verification report so the frontend can render a
+    side-by-side DDL comparison against the BigQuery schema.
+    """
+    cur = oracle_conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT column_name,
+                   data_type,
+                   data_length,
+                   data_precision,
+                   data_scale,
+                   nullable
+            FROM   all_tab_columns
+            WHERE  table_name = UPPER(:t)
+            ORDER  BY column_id
+            """,
+            t=table,
+        )
+        out: list[dict] = []
+        for name, dt, length, precision, scale in (
+            (r[0], r[1], r[2], r[3], r[4]) for r in cur.fetchall()
+        ):
+            # Build a readable Oracle data-type string. Numeric types
+            # carry (precision, scale); VARCHAR2 carries length.
+            base = dt or ""
+            ty = base
+            if base in ("NUMBER",) and precision is not None:
+                ty = f"NUMBER({precision}" + (f",{scale}" if scale else "") + ")"
+            elif base in ("VARCHAR2", "CHAR", "NVARCHAR2", "NCHAR") and length:
+                ty = f"{base}({length})"
+            out.append({"name": name, "data_type": ty, "nullable": True})
+        # Re-execute to capture the nullable flag too (column_id-based
+        # iterator above intentionally dropped it; do it here to keep
+        # the parsing block focused).
+        cur.execute(
+            "SELECT column_name, nullable FROM all_tab_columns "
+            "WHERE table_name = UPPER(:t)",
+            t=table,
+        )
+        nullable_by_name = {r[0]: (r[1] != "N") for r in cur.fetchall()}
+        for c in out:
+            c["nullable"] = nullable_by_name.get(c["name"], True)
+        return out
+    except Exception:
+        return []
 
 
 def _oracle_column_aggregates(
