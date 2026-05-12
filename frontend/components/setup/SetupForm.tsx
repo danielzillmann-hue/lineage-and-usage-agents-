@@ -22,9 +22,9 @@ const AGENTS: AgentSpec[] = [
   { id: "inventory",     name: "Inventory",     desc: "Live Oracle introspection — tables, views, columns, FKs, audit log",        icon: Database,  tint: "#0288D1", bg: "#E1F5FE" },
   { id: "lineage",       name: "Lineage",       desc: "Column-level lineage from ETL XML pipelines and FK relationships",          icon: GitBranch, tint: "#00838F", bg: "#E0F2F1" },
   { id: "usage",         name: "Usage",         desc: "Pipeline run history, success rates, undocumented executions",              icon: Activity,  tint: "#388E3C", bg: "#E8F5E9" },
-  { id: "summary",       name: "Summary",       desc: "Gemini synthesis: headline, findings, recommendations",                     icon: Sparkles,  tint: "#F57C00", bg: "#FFF3E0" },
-  { id: "transform",     name: "Transformation", desc: "Generate Dataform SQLX from the Oracle pipelines (BigQuery target)",       icon: FileCode2, tint: "#0FB37A", bg: "#E8F5E9" },
-  { id: "orchestration", name: "Orchestration", desc: "Generate a GitHub Actions workflow (compile-on-push + scheduled run)",      icon: Workflow,  tint: "#0A8B5E", bg: "#E0F2F1" },
+  { id: "summary",       name: "Summary and planning", desc: "Gemini synthesis: headline, findings, recommendations",              icon: Sparkles,  tint: "#F57C00", bg: "#FFF3E0" },
+  { id: "transform",     name: "Transformation", desc: "Generate Dataform SQLX from the legacy pipelines (strategic target)",      icon: FileCode2, tint: "#0FB37A", bg: "#E8F5E9" },
+  { id: "orchestration", name: "Deployment Agent", desc: "Generate a GitHub Actions workflow (compile-on-push + scheduled run)",   icon: Workflow,  tint: "#0A8B5E", bg: "#E0F2F1" },
 ];
 
 // ─── Source-system catalogue ────────────────────────────────────────────────
@@ -198,9 +198,10 @@ export function SetupForm() {
         className="text-pretty"
         style={{ fontSize: 17, lineHeight: 1.55, color: "var(--ink-2)", maxWidth: 640, margin: 0 }}
       >
-        Six agents introspect your warehouse — Oracle, Teradata, MS SQL, BigQuery, Snowflake,
-        or Sybase — map column-level lineage, score usage, generate Dataform SQLX, and emit a
-        CI workflow. Minutes, not weeks. Toggle any agent on or off in the picker to the right.
+        Multiple agents — customisable, extensible — introspect your warehouse (Oracle,
+        Teradata, MS SQL, BigQuery, Snowflake, or Sybase), map column-level lineage, score
+        usage, generate Dataform SQLX, and emit a CI workflow. Minutes, not weeks. Add or
+        remove agents in the picker to the right.
       </p>
 
       <div
