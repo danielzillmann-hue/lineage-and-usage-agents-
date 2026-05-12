@@ -18,6 +18,18 @@ type AgentSpec = {
   bg: string;   // tinted background when active
 };
 
+// Available Gemini models — presentational only. Defaults are pinned on
+// the server (Flash for inventory/lineage/usage, Pro for summary +
+// procedure converter); the dropdown lets the user see what's available
+// without rewiring the agent dispatch.
+const MODELS: { id: string; label: string; tag?: string; desc: string }[] = [
+  { id: "gemini-2.5-pro",       label: "Gemini 2.5 Pro",        tag: "default", desc: "Highest reasoning quality — used for executive summary + PL/SQL translation." },
+  { id: "gemini-2.5-flash",     label: "Gemini 2.5 Flash",      tag: "fast",    desc: "Fast, capable. Used for inventory, lineage, and usage agents by default." },
+  { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite", tag: "cheapest", desc: "Smallest 2.5 variant — lowest cost per call, lighter reasoning." },
+  { id: "gemini-2.0-pro",       label: "Gemini 2.0 Pro",                          desc: "Previous-generation Pro. Use only if you've pinned a workflow to it." },
+  { id: "gemini-2.0-flash",     label: "Gemini 2.0 Flash",                        desc: "Previous-generation Flash. Cheaper but slower reasoning than 2.5." },
+];
+
 const AGENTS: AgentSpec[] = [
   { id: "inventory",     name: "Inventory",     desc: "Live Oracle introspection — tables, views, columns, FKs, audit log",        icon: Database,  tint: "#0288D1", bg: "#E1F5FE" },
   { id: "lineage",       name: "Lineage",       desc: "Column-level lineage from ETL XML pipelines and FK relationships",          icon: GitBranch, tint: "#00838F", bg: "#E0F2F1" },
@@ -110,6 +122,9 @@ export function SetupForm() {
   const [prefix, setPrefix] = useState("");
   const [outputsPrefix, setOutputsPrefix] = useState<string | null>(null);
   const [active, setActive] = useState<AgentName[]>(["inventory", "lineage", "usage", "summary", "transform", "orchestration"]);
+  // Model selection is presentational for now — agents always use the
+  // server-side defaults. Wire-through is a TODO.
+  const [model, setModel] = useState<string>("gemini-2.5-pro");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
@@ -351,6 +366,36 @@ export function SetupForm() {
                 {error}
               </div>
             )}
+          </div>
+
+          {/* Model picker — pure UI for now; the agents themselves use
+              server-side defaults. */}
+          <div style={{ border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-elev)", padding: "14px 18px" }}>
+            <div className="eyebrow">Model</div>
+            <div style={{ fontSize: 13.5, fontWeight: 500, marginTop: 6, color: "var(--ink)" }}>
+              {MODELS.find((m) => m.id === model)?.label ?? model}
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 4, lineHeight: 1.45 }}>
+              {MODELS.find((m) => m.id === model)?.desc}
+            </div>
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="mono"
+              style={{
+                marginTop: 10,
+                width: "100%", height: 32, padding: "0 8px",
+                fontSize: 12, color: "var(--ink)",
+                background: "var(--bg)", border: "1px solid var(--line)",
+                borderRadius: 6, outline: "none",
+              }}
+            >
+              {MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label} {m.tag ? `· ${m.tag}` : ""}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Agents picker — always visible while you fill the form */}
