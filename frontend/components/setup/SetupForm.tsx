@@ -18,16 +18,25 @@ type AgentSpec = {
   bg: string;   // tinted background when active
 };
 
-// Available Gemini models — presentational only. Defaults are pinned on
-// the server (Flash for inventory/lineage/usage, Pro for summary +
-// procedure converter); the dropdown lets the user see what's available
-// without rewiring the agent dispatch.
+// Available models across providers — presentational only. Defaults are
+// pinned on the server (Gemini 2.5 Flash for inventory/lineage/usage,
+// Pro for summary + procedure converter); the dropdown shows the user
+// what's swappable in principle without rewiring agent dispatch.
 const MODELS: { id: string; label: string; tag?: string; desc: string }[] = [
-  { id: "gemini-2.5-pro",       label: "Gemini 2.5 Pro",        tag: "default", desc: "Highest reasoning quality — used for executive summary + PL/SQL translation." },
-  { id: "gemini-2.5-flash",     label: "Gemini 2.5 Flash",      tag: "fast",    desc: "Fast, capable. Used for inventory, lineage, and usage agents by default." },
+  // Google Gemini (Vertex AI — used in production)
+  { id: "gemini-2.5-pro",        label: "Gemini 2.5 Pro",        tag: "default",  desc: "Highest reasoning quality — used for executive summary + PL/SQL translation." },
+  { id: "gemini-2.5-flash",      label: "Gemini 2.5 Flash",      tag: "fast",     desc: "Fast, capable. Used for inventory, lineage, and usage agents by default." },
   { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite", tag: "cheapest", desc: "Smallest 2.5 variant — lowest cost per call, lighter reasoning." },
-  { id: "gemini-2.0-pro",       label: "Gemini 2.0 Pro",                          desc: "Previous-generation Pro. Use only if you've pinned a workflow to it." },
-  { id: "gemini-2.0-flash",     label: "Gemini 2.0 Flash",                        desc: "Previous-generation Flash. Cheaper but slower reasoning than 2.5." },
+  { id: "gemini-2.0-pro",        label: "Gemini 2.0 Pro",                         desc: "Previous-generation Pro. Use only if you've pinned a workflow to it." },
+  { id: "gemini-2.0-flash",      label: "Gemini 2.0 Flash",                       desc: "Previous-generation Flash. Cheaper but slower reasoning than 2.5." },
+  // Anthropic Claude (via Vertex AI Model Garden or direct API)
+  { id: "claude-opus-4-7",       label: "Claude Opus 4.7",       tag: "anthropic", desc: "Top-tier reasoning. Strong for procedure translation and long-context synthesis." },
+  { id: "claude-sonnet-4-6",     label: "Claude Sonnet 4.6",     tag: "anthropic", desc: "Balanced cost / quality. Good general-purpose substitute for Gemini Pro." },
+  { id: "claude-haiku-4-5",      label: "Claude Haiku 4.5",      tag: "anthropic", desc: "Fastest Claude variant. Use for high-volume tagging / classification passes." },
+  // OpenAI (via Vertex AI Model Garden or direct API)
+  { id: "gpt-5",                 label: "GPT-5",                 tag: "openai",    desc: "OpenAI's flagship reasoning model. Strong on SQL dialect transformations." },
+  { id: "gpt-5-mini",            label: "GPT-5 mini",            tag: "openai",    desc: "Cheaper GPT-5 variant. Decent reasoning at significantly lower cost." },
+  { id: "gpt-4.1",               label: "GPT-4.1",               tag: "openai",    desc: "Previous-generation GPT-4. Use if you've validated against it elsewhere." },
 ];
 
 const AGENTS: AgentSpec[] = [

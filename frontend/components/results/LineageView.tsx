@@ -1226,39 +1226,55 @@ function GraphSVG({
                 markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--line)" />
         </marker>
+        <marker id="arrow-focus" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--brand-emerald)" />
+        </marker>
       </defs>
       <rect width={W} height={H} fill="url(#dotgrid)" opacity="0.5" />
 
-      {/* Subgraph banners — drawn behind everything so edges/nodes sit on top */}
-      {subgraphBoxes.map((box, i) => (
-        <g key={`sg-${i}`} style={{ pointerEvents: "none" }}>
-          <rect
-            x={box.x}
-            y={box.y}
-            width={box.w}
-            height={box.h}
-            rx={14}
-            fill="var(--bg-elev)"
-            stroke="var(--line-strong)"
-            strokeWidth={1.25}
-            strokeDasharray="6 4"
-            opacity={0.75}
-          />
-          <text
-            x={box.x + 14}
-            y={box.y + 18}
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 11,
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
-              fill: "var(--ink-3)",
-            }}
-          >
-            {box.label}
-          </text>
-        </g>
-      ))}
+      {/* Subgraph banners — drawn behind everything so edges/nodes sit on top.
+          When a node is selected and a box contains none of the focused
+          chain, fade the box hard so it doesn't wash out highlighted nodes. */}
+      {subgraphBoxes.map((box, i) => {
+        const inFocus = !selected || !focusSet
+          ? true
+          : box.nodes.some((n) => focusSet.has(n));
+        const boxOpacity = inFocus ? 0.6 : 0.12;
+        const labelOpacity = inFocus ? 1 : 0.3;
+        return (
+          <g key={`sg-${i}`} style={{ pointerEvents: "none" }}>
+            <rect
+              x={box.x}
+              y={box.y}
+              width={box.w}
+              height={box.h}
+              rx={14}
+              fill="var(--bg-elev)"
+              stroke="var(--line-strong)"
+              strokeWidth={1.25}
+              strokeDasharray="6 4"
+              opacity={boxOpacity}
+              style={{ transition: "opacity .2s" }}
+            />
+            <text
+              x={box.x + 14}
+              y={box.y + 18}
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                fill: "var(--ink-3)",
+                opacity: labelOpacity,
+                transition: "opacity .2s",
+              }}
+            >
+              {box.label}
+            </text>
+          </g>
+        );
+      })}
 
       {/* Edges — orthogonal H-V-H with rounded line-joins and arrow heads */}
       {edges.map((e, i) => {
@@ -1305,13 +1321,13 @@ function GraphSVG({
             <path
               d={d}
               fill="none"
-              stroke={dim ? "var(--line)" : "var(--ink-3)"}
-              strokeOpacity={dim ? 0.3 : 0.7}
-              strokeWidth={1.25}
+              stroke={dim ? "var(--line)" : (selected ? "var(--brand-emerald)" : "var(--ink-3)")}
+              strokeOpacity={dim ? 0.18 : (selected ? 1 : 0.7)}
+              strokeWidth={dim ? 1 : (selected ? 1.75 : 1.25)}
               strokeLinejoin="round"
               strokeLinecap="round"
-              markerEnd={dim ? "url(#arrow-dim)" : "url(#arrow)"}
-              style={{ transition: "opacity .2s, stroke .2s" }}
+              markerEnd={dim ? "url(#arrow-dim)" : (selected ? "url(#arrow-focus)" : "url(#arrow)")}
+              style={{ transition: "opacity .2s, stroke .2s, stroke-width .2s" }}
             />
             {lbl && (
               <g transform={`translate(${tx}, ${ty})`}>
@@ -1436,7 +1452,7 @@ function GraphSVG({
         return (
           <g
             key={id}
-            style={{ cursor: "pointer", opacity: dim ? 0.18 : 1, transition: "opacity .2s" }}
+            style={{ cursor: "pointer", opacity: dim ? 0.1 : 1, transition: "opacity .2s" }}
             onClick={() => onSelect(id)}
           >
             {shape}
