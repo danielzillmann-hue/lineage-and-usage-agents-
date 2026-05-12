@@ -470,6 +470,59 @@ export function LineageView({
     [selected, edges],
   );
 
+  // Per-column projection of every raw edge that touches the selected
+  // node. Each column tracks which operations it appears in (join, fk,
+  // extract, transform, …) and which other nodes it connects to. Used
+  // to render the inspector's Columns panel — joins jump out via the
+  // "join" badge and the linked-node hint.
+  type ColumnInfo = {
+    name: string;
+    ops: Set<string>;                       // distinct operation tags
+    partners: Map<string, Set<string>>;     // other_node → set of ops
+  };
+  const nodeColumns = useMemo<ColumnInfo[]>(() => {
+    if (!selected || !lineage) return [];
+    const byName = new Map<string, ColumnInfo>();
+    for (const e of lineage.edges) {
+      const op = (e.operation || "").toLowerCase();
+      let col: string | null = null;
+      let partner: string | null = null;
+      if (e.source_fqn === selected) {
+        col = e.source_column ?? null;
+        partner = e.target_fqn;
+      } else if (e.target_fqn === selected) {
+        col = e.target_column ?? null;
+        partner = e.source_fqn;
+      } else {
+        // For pipeline-collapsed views, also surface columns from the
+        // pipeline's own step edges so a selected pipeline shows its
+        // internal join keys.
+        const ownsSrc = e.source_fqn.startsWith(`${selected}.`);
+        const ownsDst = e.target_fqn.startsWith(`${selected}.`);
+        if (ownsSrc) { col = e.source_column ?? null; partner = e.target_fqn; }
+        else if (ownsDst) { col = e.target_column ?? null; partner = e.source_fqn; }
+      }
+      if (!col) continue;
+      let info = byName.get(col);
+      if (!info) {
+        info = { name: col, ops: new Set(), partners: new Map() };
+        byName.set(col, info);
+      }
+      if (op) info.ops.add(op);
+      if (partner && partner !== selected) {
+        let ps = info.partners.get(partner);
+        if (!ps) { ps = new Set(); info.partners.set(partner, ps); }
+        if (op) ps.add(op);
+      }
+    }
+    // Order: join keys first, then fk keys, then alphabetical.
+    return Array.from(byName.values()).sort((a, b) => {
+      const aJ = a.ops.has("join") ? 0 : a.ops.has("fk") ? 1 : 2;
+      const bJ = b.ops.has("join") ? 0 : b.ops.has("fk") ? 1 : 2;
+      return aJ - bJ || a.name.localeCompare(b.name);
+    });
+  }, [selected, lineage]);
+
   const sel = selected ? { id: selected, layer: normalizeLayer(inferLayer(selected)) } : null;
 
   // Subgraph detection — identify per-output chains and the nodes exclusive
@@ -812,6 +865,71 @@ export function LineageView({
               {sel.id.split(".")[0]}
             </div>
 
+            {nodeColumns.length > 0 && (
+              <div style={{ marginTop: 20 }}>
+                <div className="eyebrow">Columns ({nodeColumns.length})</div>
+                <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0" }}>
+                  {nodeColumns.map((c) => {
+                    const isJoin = c.ops.has("join");
+                    const isFk = c.ops.has("fk");
+                    const otherOps = Array.from(c.ops).filter((o) => o !== "join" && o !== "fk");
+                    const joinPartners = Array.from(c.partners.entries())
+                      .filter(([, ops]) => ops.has("join") || ops.has("fk"))
+                      .map(([p]) => p);
+                    return (
+                      <li
+                        key={c.name}
+                        style={{
+                          padding: "6px 10px", borderRadius: 4, marginBottom: 4,
+                          background: isJoin || isFk ? "var(--soft-info-bg)" : "var(--bg-sunk)",
+                          border: isJoin || isFk ? "1px solid var(--soft-info-bd)" : "1px solid transparent",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <span
+                            className="mono"
+                            style={{
+                              fontSize: 12,
+                              color: isJoin || isFk ? "var(--soft-info-fg)" : "var(--ink-2)",
+                              fontWeight: isJoin || isFk ? 500 : 400,
+                              wordBreak: "break-all",
+                            }}
+                          >
+                            {c.name}
+                          </span>
+                          {isJoin && <ColBadge tone="info">join</ColBadge>}
+                          {isFk && <ColBadge tone="info">fk</ColBadge>}
+                          {otherOps.slice(0, 2).map((o) => (
+                            <ColBadge key={o} tone="muted">{o}</ColBadge>
+                          ))}
+                        </div>
+                        {joinPartners.length > 0 && (
+                          <div style={{ marginTop: 4, fontSize: 11, color: "var(--ink-3)" }}>
+                            {joinPartners.slice(0, 3).map((p, i) => (
+                              <span key={p}>
+                                {i > 0 && ", "}
+                                <span
+                                  className="mono"
+                                  style={{ cursor: "pointer", textDecoration: "underline dotted" }}
+                                  onClick={() => setSelected(p)}
+                                  title="Jump to this node"
+                                >
+                                  ↔ {p.split(".").slice(-2).join(".")}
+                                </span>
+                              </span>
+                            ))}
+                            {joinPartners.length > 3 && (
+                              <span style={{ color: "var(--ink-4)" }}> +{joinPartners.length - 3}</span>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+
             <div style={{ marginTop: 20 }}>
               <div className="eyebrow">Upstream ({upstream.length})</div>
               <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0" }}>
@@ -864,6 +982,27 @@ export function LineageView({
 }
 
 // ─── Toolbar / export helpers ───────────────────────────────────────────────
+
+function ColBadge({
+  tone, children,
+}: { tone: "info" | "muted"; children: React.ReactNode }) {
+  const fg = tone === "info" ? "var(--soft-info-fg)" : "var(--ink-3)";
+  const bg = tone === "info" ? "var(--bg)" : "var(--bg)";
+  const bd = tone === "info" ? "var(--soft-info-bd)" : "var(--line)";
+  return (
+    <span
+      className="mono"
+      style={{
+        fontSize: 9.5, padding: "1px 6px",
+        borderRadius: 99, color: fg, background: bg,
+        border: `1px solid ${bd}`, letterSpacing: "0.03em",
+        textTransform: "uppercase",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
 
 const toolbarBtn: React.CSSProperties = {
   display: "inline-flex", alignItems: "center", gap: 6,
